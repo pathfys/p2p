@@ -1,1 +1,47 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0c0d">
+<meta name="description" content="P2PDesk — AI-терминал P2P-стаканов криптобирж: агрегация, фильтрация, анализ контекста сделки и закупки USDT.">
+<title>P2PDesk — AI P2P Terminal</title>
 
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23d4ff3f'/%3E%3Ctext x='16' y='22' font-family='Helvetica,Arial' font-size='15' font-weight='bold' text-anchor='middle' fill='%230a0c0d'%3EP2%3C/text%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..800;1,62..125,400..700&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="./styles/tokens.css">
+<link rel="stylesheet" href="./styles/base.css">
+<link rel="stylesheet" href="./styles/components.css">
+<link rel="stylesheet" href="./styles/screens.css">
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">P2</div>
+      <div>
+        <div class="brand-name display" id="screen-title">P2PDESK</div>
+        <div class="brand-sub" id="screen-sub">ai p2p terminal</div>
+      </div>
+    </div>
+    <div id="topbar-slot" style="display:flex;align-items:center;gap:8px"></div>
+  </header>
+
+  <main id="view" aria-live="polite"></main>
+
+  <nav class="tabbar" id="tabbar" role="tablist" aria-label="Основная навигация"></nav>
+</div>
+
+<div id="toasts" aria-live="assertive"></div>
+<div id="layers"></div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
