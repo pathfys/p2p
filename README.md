@@ -14,6 +14,18 @@ python3 -m http.server 8080
 # → http://localhost:8080
 ```
 
+### Сборка в один файл
+
+```bash
+python3 tools/bundle.py          # → dist/index.html (~283 KB)
+```
+
+CSS, все модули и иконки монет встраиваются внутрь; снаружи остаются только
+Google Fonts и Telegram WebApp SDK. Такой файл открывается двойным кликом и
+заливается на любой хостинг как есть. Для встраивания берутся уменьшенные
+копии логотипов из `assets/coins/min/` (оригиналы в `assets/coins/` не
+трогаются) — это 283 KB вместо 983 KB.
+
 Внутри Telegram: BotFather → `/newapp` → указать URL. Вне Telegram SDK уходит
 в заглушку, всё работает в обычном браузере.
 
