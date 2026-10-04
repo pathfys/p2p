@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import random
 import time
 from dataclasses import dataclass
@@ -79,7 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_owners_tier      ON owners(tier, value_ton);
 """
 
 GIFT_SELECT = """
-SELECT g.slug, g.number, COALESCE(c.title, g.collection) AS title,
+SELECT g.rowid AS gift_rowid, g.owner_id, g.slug, g.number, COALESCE(c.title, g.collection) AS title,
        g.model, g.model_rarity, g.backdrop, g.backdrop_rarity, g.symbol, g.symbol_rarity,
        g.owner_name, o.username, o.name AS o_name, o.ton_address, o.user_id,
        o.tier, o.gifts_count, o.value_ton
@@ -90,6 +91,8 @@ LEFT JOIN collections c ON c.slug = g.collection
 
 FILTER_FIELDS = ("collection", "backdrop", "model", "symbol")
 TIERS = ("light", "medium", "rich")
+# «Человек» в выдаче — Telegram-аккаунт (TON-кошельки и скрытые владельцы не считаются)
+PERSON = "(o.username IS NOT NULL OR o.user_id IS NOT NULL)"
 
 
 @dataclass
@@ -116,6 +119,9 @@ class Database:
         self.default_gift_ton = default_gift_ton
         self._conn: aiosqlite.Connection | None = None
         self._stats_cache: tuple[float, dict[str, int]] | None = None
+        # save_gifts делает SELECT → INSERT владельца; без блокировки параллельные корутины
+        # (фоновый парсер + живые проверки) могут вставить одного владельца дважды
+        self._write_lock = asyncio.Lock()
 
     @property
     def conn(self) -> aiosqlite.Connection:
@@ -278,6 +284,10 @@ class Database:
 
     async def save_gifts(self, gifts: Iterable[ParsedGift]) -> set[int]:
         """Сохраняет подарки и владельцев; пересчитывает режимы затронутых владельцев."""
+        async with self._write_lock:
+            return await self._save_gifts(gifts)
+
+    async def _save_gifts(self, gifts: Iterable[ParsedGift]) -> set[int]:
         touched: set[int] = set()
         meta: dict[str, ParsedGift] = {}
         for gift in gifts:
@@ -337,22 +347,23 @@ class Database:
 
     async def save_portfolio(self, portfolio: Portfolio) -> int:
         """Полный список NFT одного аккаунта (Bot API / MTProto)."""
-        for gift in portfolio.gifts:
-            gift.owner = portfolio.owner
-        await self.save_gifts(portfolio.gifts)
-        owner_id = await self._owner_id(portfolio.owner)
-        if owner_id and portfolio.complete:
-            # подарки, которых больше нет в портфеле, отвязываем от владельца
-            slugs = [g.slug for g in portfolio.gifts]
-            marks = ",".join("?" * len(slugs)) or "''"
-            await self.conn.execute(
-                f"UPDATE gifts SET owner_id = NULL WHERE owner_id = ? AND slug NOT IN ({marks})",
-                (owner_id, *slugs),
-            )
-            await self.conn.execute("UPDATE owners SET gifts_checked_at = ? WHERE id = ?", (now(), owner_id))
-            await self.recompute_owners({owner_id})
-        await self.conn.commit()
-        return len(portfolio.gifts)
+        async with self._write_lock:
+            for gift in portfolio.gifts:
+                gift.owner = portfolio.owner
+            await self._save_gifts(portfolio.gifts)
+            owner_id = await self._owner_id(portfolio.owner)
+            if owner_id and portfolio.complete:
+                # подарки, которых больше нет в портфеле, отвязываем от владельца
+                slugs = [g.slug for g in portfolio.gifts]
+                marks = ",".join("?" * len(slugs)) or "''"
+                await self.conn.execute(
+                    f"UPDATE gifts SET owner_id = NULL WHERE owner_id = ? AND slug NOT IN ({marks})",
+                    (owner_id, *slugs),
+                )
+                await self.conn.execute("UPDATE owners SET gifts_checked_at = ? WHERE id = ?", (now(), owner_id))
+                await self.recompute_owners({owner_id})
+            await self.conn.commit()
+            return len(portfolio.gifts)
 
     async def recompute_owners(self, ids: set[int] | None = None) -> None:
         """Количество NFT, оценка портфеля в TON и режим (light / medium / rich)."""
@@ -399,7 +410,9 @@ class Database:
         await self.conn.commit()
 
     # ----------------------------------------------------------------- search
-    async def search(self, q: SearchQuery, *, limit: int, offset: int) -> tuple[list[aiosqlite.Row], int]:
+    @staticmethod
+    def _gift_conditions(q: SearchQuery) -> tuple[list[str], list[object]]:
+        """Условия по самому подарку: коллекция, фон, модель, узор и свободный текст."""
         where: list[str] = []
         args: list[object] = []
         for field in FILTER_FIELDS:
@@ -407,18 +420,22 @@ class Database:
             if value:
                 where.append(f"g.{field} = ? COLLATE NOCASE")
                 args.append(value)
-        if q.owner:
-            where.append("o.username = ?")
-            args.append(q.owner.lstrip("@"))
-        if q.tier in TIERS:
-            where.append("o.tier = ?")
-            args.append(q.tier)
         for word in (q.text or "").split():
             like = f"%{word}%"
             where.append(
                 "(c.title LIKE ? OR g.collection LIKE ? OR g.model LIKE ? OR g.backdrop LIKE ? OR g.symbol LIKE ?)"
             )
             args += [like, like, like, like, like]
+        return where, args
+
+    async def search(self, q: SearchQuery, *, limit: int, offset: int) -> tuple[list[aiosqlite.Row], int]:
+        where, args = self._gift_conditions(q)
+        if q.owner:
+            where.append("o.username = ?")
+            args.append(q.owner.lstrip("@"))
+        if q.tier in TIERS:
+            where.append("o.tier = ?")
+            args.append(q.tier)
 
         cond = f"WHERE {' AND '.join(where)}" if where else ""
         total = await self._scalar(
@@ -435,23 +452,66 @@ class Database:
         cur = await self.conn.execute(f"{GIFT_SELECT} WHERE g.slug = ?", (slug,))
         return await cur.fetchone()
 
-    async def random_gifts(self, count: int) -> list[aiosqlite.Row]:
-        """Режим «Все подарки»: случайные подарки, по возможности из разных коллекций."""
-        max_rowid = await self._scalar("SELECT COALESCE(MAX(rowid), 0) FROM gifts")
-        if not max_rowid:
+    async def search_people(self, q: SearchQuery, *, limit: int, exclude: Iterable[int] = ()) -> list[dict]:
+        """Люди, у которых есть подходящий подарок. Для каждого — самый дорогой из подходящих подарков."""
+        where, args = self._gift_conditions(q)
+        gift_filtered = bool(where)
+        where.append(PERSON)
+        if q.tier in TIERS:
+            where.append("o.tier = ?")
+            args.append(q.tier)
+        if excluded := ",".join(str(int(i)) for i in exclude):
+            where.append(f"o.id NOT IN ({excluded})")
+        shuffle = f"((o.id * {int(q.seed) % 1000003 or 1}) % 1000003)"
+        order = f"o.value_ton DESC, {shuffle}" if q.tier == "rich" else shuffle
+        cond = " AND ".join(where)
+        if gift_filtered:
+            # bare-колонка g.rowid берётся из строки с MAX(floor) — особенность SQLite
+            sql = f"""SELECT o.id AS owner_id, COUNT(*) AS matched, g.rowid AS gift_rowid,
+                             MAX(COALESCE(c.floor_ton, 0)) AS best_floor
+                      FROM gifts g JOIN owners o ON o.id = g.owner_id
+                      LEFT JOIN collections c ON c.slug = g.collection
+                      WHERE {cond} GROUP BY o.id ORDER BY {order} LIMIT ?"""
+        else:  # без фильтров по подарку идём от таблицы владельцев — это быстрее
+            sql = f"""SELECT o.id AS owner_id, 1 AS matched,
+                             (SELECT g.rowid FROM gifts g LEFT JOIN collections c ON c.slug = g.collection
+                              WHERE g.owner_id = o.id ORDER BY COALESCE(c.floor_ton, 0) DESC LIMIT 1) AS gift_rowid
+                      FROM owners o WHERE {cond} AND o.gifts_count > 0 ORDER BY {order} LIMIT ?"""
+        cur = await self.conn.execute(sql, (*args, limit))
+        return await self._people_rows(list(await cur.fetchall()))
+
+    async def random_people(self, count: int, *, exclude: Iterable[int] = ()) -> list[dict]:
+        """Режим «Все подарки»: случайные люди со случайным подарком, по возможности из разных коллекций."""
+        excluded = {int(i) for i in exclude}
+        max_id = await self._scalar("SELECT COALESCE(MAX(id), 0) FROM owners")
+        if not max_id:
             return []
-        if max_rowid <= count * 20:
-            cur = await self.conn.execute(f"{GIFT_SELECT} ORDER BY RANDOM() LIMIT ?", (count * 6,))
-        else:
-            ids = random.sample(range(1, max_rowid + 1), count * 6)
-            cur = await self.conn.execute(f"{GIFT_SELECT} WHERE g.rowid IN ({','.join(map(str, ids))})")
-        rows = list(await cur.fetchall())
-        random.shuffle(rows)
+        conditions = f"{PERSON} AND o.gifts_count > 0"
+        if max_id > count * 50:  # большая база: случайные id вместо ORDER BY RANDOM() по всей таблице
+            ids = [i for i in random.sample(range(1, max_id + 1), min(max_id, count * 40)) if i not in excluded]
+            conditions += f" AND o.id IN ({','.join(map(str, ids)) or '0'})"
+        elif excluded:
+            conditions += f" AND o.id NOT IN ({','.join(map(str, excluded))})"
+        cur = await self.conn.execute(
+            f"""SELECT o.id AS owner_id, 1 AS matched,
+                       (SELECT g.rowid FROM gifts g WHERE g.owner_id = o.id ORDER BY RANDOM() LIMIT 1) AS gift_rowid
+                FROM owners o WHERE {conditions} ORDER BY RANDOM() LIMIT ?""",
+            (count * 3,),
+        )
+        people = await self._people_rows(list(await cur.fetchall()))
         picked, rest, seen = [], [], set()
-        for row in rows:
-            (rest if row["title"] in seen else picked).append(row)
-            seen.add(row["title"])
+        for person in people:  # сначала по одному человеку на коллекцию — «абсолютно разные подарки»
+            (rest if person["title"] in seen else picked).append(person)
+            seen.add(person["title"])
         return (picked + rest)[:count]
+
+    async def _people_rows(self, picks: list[aiosqlite.Row]) -> list[dict]:
+        rowids = [p["gift_rowid"] for p in picks if p["gift_rowid"] is not None]
+        if not rowids:
+            return []
+        cur = await self.conn.execute(f"{GIFT_SELECT} WHERE g.rowid IN ({','.join(map(str, rowids))})")
+        gifts = {row["gift_rowid"]: dict(row) for row in await cur.fetchall()}
+        return [{**gifts[p["gift_rowid"]], "matched": p["matched"]} for p in picks if p["gift_rowid"] in gifts]
 
     async def distinct_values(self, field: str, collection: str | None = None) -> list[str]:
         if field not in ("backdrop", "model", "symbol"):

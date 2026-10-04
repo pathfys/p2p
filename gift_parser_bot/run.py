@@ -13,6 +13,8 @@ from app.config import load_settings
 from app.crawler import Crawler
 from app.db import Database
 from app.handlers import build_routers
+from app.people import PeopleParser
+from app.subscription import SubscriptionChecker, SubscriptionMiddleware
 
 
 async def main() -> None:
@@ -34,7 +36,18 @@ async def main() -> None:
     crawler = Crawler(db, settings, bot)
     await crawler.setup()
 
-    dp = Dispatcher(storage=MemoryStorage(), db=db, crawler=crawler, settings=settings)
+    checker = SubscriptionChecker(settings.required_channel, settings.admin_ids)
+    dp = Dispatcher(
+        storage=MemoryStorage(),
+        db=db,
+        crawler=crawler,
+        settings=settings,
+        checker=checker,
+        people_parser=PeopleParser(db, crawler, settings),
+    )
+    # обязательная подписка: до подписки доступны только кнопки «Подписаться» / «Проверить подписку»
+    dp.message.outer_middleware(SubscriptionMiddleware(checker))
+    dp.callback_query.outer_middleware(SubscriptionMiddleware(checker))
     dp.include_routers(*build_routers(settings.admin_ids))
 
     await bot.set_my_commands([BotCommand(command="start", description="Главное меню")])

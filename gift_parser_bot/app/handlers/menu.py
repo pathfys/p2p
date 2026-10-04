@@ -6,27 +6,37 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, User
 
 from .. import keyboards as kb
 from .. import texts
 from ..config import Settings
 from ..crawler import Crawler
 from ..db import Database
+from ..people import PeopleParser
 from .common import safe_edit, spawn
+from .people_view import run_people
 
 router = Router(name="menu")
+
+
+async def open_menu(message: Message, user: User, db: Database, crawler: Crawler, *, edit: bool) -> None:
+    """Регистрирует пользователя и показывает приветствие с главным меню."""
+    if await db.touch_user(user.id, user.username, user.first_name):
+        # Новый пользователь: его NFT-подарки сразу попадают в базу через Bot API getUserGifts
+        spawn(crawler.parse_user(user.id, user.username, user.full_name))
+    mode = await db.get_mode(user.id)
+    text, markup = texts.welcome(user.first_name, await db.cached_stats()), kb.main_menu(mode)
+    if edit:
+        await safe_edit(message, text, markup)
+    else:
+        await message.answer(text, reply_markup=markup)
 
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, db: Database, crawler: Crawler) -> None:
     await state.set_state(None)
-    user = message.from_user
-    if await db.touch_user(user.id, user.username, user.first_name):
-        # Новый пользователь: его NFT-подарки сразу попадают в базу через Bot API getUserGifts
-        spawn(crawler.parse_user(user.id, user.username, user.full_name))
-    mode = await db.get_mode(user.id)
-    await message.answer(texts.welcome(user.first_name, await db.cached_stats()), reply_markup=kb.main_menu(mode))
+    await open_menu(message, message.from_user, db, crawler, edit=False)
 
 
 @router.callback_query(kb.MenuCb.filter(F.action == "main"))
@@ -55,12 +65,23 @@ async def cb_mode(
 
 
 @router.callback_query(kb.MenuCb.filter(F.action == "random"))
-async def cb_random(call: CallbackQuery, db: Database, settings: Settings) -> None:
-    """4-й режим: абсолютно случайные подарки из всей базы, независимо от фильтров и уровня."""
+async def cb_random(
+    call: CallbackQuery, state: FSMContext, db: Database, people_parser: PeopleParser, settings: Settings
+) -> None:
+    """4-й режим: случайные люди с абсолютно разными подарками, независимо от фильтров и уровня."""
     await db.set_mode(call.from_user.id, "all")
-    rows = await db.random_gifts(settings.random_count)
-    await safe_edit(call.message, texts.random_gifts(rows), kb.random_gifts())
-    await call.answer("🎲")
+    await call.answer(f"🎲 {texts.PARSING}")
+    await run_people(
+        call.message,
+        state,
+        people_parser,
+        settings,
+        query=None,
+        header=texts.RANDOM_HEADER,
+        mode="all",
+        back="random",
+        edit=True,
+    )
 
 
 @router.callback_query(kb.MenuCb.filter(F.action == "stats"))

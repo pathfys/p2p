@@ -121,9 +121,6 @@ def test_search_filters_and_random(tmp_path):
         page2, _ = await db.search(SearchQuery(seed=777), limit=2, offset=2)
         assert total == 4 and len({r["slug"] for r in page1 + page2}) == 4  # пагинация без повторов
 
-        picked = await db.random_gifts(2)
-        assert len(picked) == 2 and picked[0]["title"] != picked[1]["title"]  # из разных коллекций
-
         assert await db.distinct_values("backdrop") == ["Amber", "Onyx Black"]
         assert await db.distinct_values("model", "pepe") == ["Frog", "Pumpkin"]
 
@@ -161,5 +158,71 @@ def test_crawl_order_and_min_floor(tmp_path):
         assert "rich" not in [r["slug"] for r in await db.collections_to_crawl(recrawl_before=0)]
         # обход устарел — коллекция снова в очереди с №1
         assert (await db.collections_to_crawl(recrawl_before=2**40))[0]["next_number"] == 1
+
+    run(tmp_path, scenario)
+
+
+def test_search_people(tmp_path):
+    async def scenario(db):
+        await db.upsert_collections([("pepe", "Pepes"), ("pop", "Pops")])
+        await db.set_floor("pepe", 7000)
+        await db.set_floor("pop", 4)
+        await db.save_gifts(
+            [
+                gift("pop-1", Owner(username="whale"), backdrop="Amber"),
+                gift("pepe-1", Owner(username="whale"), backdrop="Amber"),
+                gift("pepe-2", Owner(username="whale"), backdrop="Onyx Black"),
+                gift("pop-2", Owner(username="small"), backdrop="Amber"),
+                gift("pop-3", Owner(user_id=77, name="No Username"), backdrop="Amber"),
+                gift("pepe-3", Owner(ton_address="UQwallet"), backdrop="Amber"),  # кошелёк — не человек
+                gift("pop-4", owner_name="Hidden", backdrop="Amber"),
+            ]
+        )
+        people = await db.search_people(SearchQuery(backdrop="amber"), limit=10)
+        by_name = {p["username"] or p["o_name"]: p for p in people}
+        assert set(by_name) == {"whale", "small", "No Username"}
+        # у каждого человека один, самый дорогой подходящий подарок + число совпадений
+        assert by_name["whale"]["slug"] == "pepe-1" and by_name["whale"]["matched"] == 2
+
+        rich = await db.search_people(SearchQuery(tier="rich"), limit=10)
+        assert [p["username"] for p in rich] == ["whale"] and rich[0]["slug"] in {"pepe-1", "pepe-2"}
+
+        whale_id = by_name["whale"]["owner_id"]
+        rest = await db.search_people(SearchQuery(backdrop="amber"), limit=10, exclude={whale_id})
+        assert whale_id not in {p["owner_id"] for p in rest} and len(rest) == 2
+
+        everyone = await db.search_people(SearchQuery(seed=5), limit=1)
+        assert len(everyone) == 1
+
+    run(tmp_path, scenario)
+
+
+def test_random_people_prefers_different_collections(tmp_path):
+    async def scenario(db):
+        await db.save_gifts(
+            [
+                gift("pepe-1", Owner(username="a")),
+                gift("pepe-2", Owner(username="b")),
+                gift("pop-1", Owner(username="c")),
+                gift("cap-1", Owner(username="d")),
+                gift("cap-2", Owner(ton_address="UQwallet")),
+            ]
+        )
+        for _ in range(10):
+            people = await db.random_people(3)
+            assert len(people) == 3
+            assert len({p["title"] for p in people}) == 3  # три разные коллекции
+            assert all(p["username"] for p in people)
+        assert {p["username"] for p in await db.random_people(10, exclude=[1, 2])} == {"c", "d"}
+
+    run(tmp_path, scenario)
+
+
+def test_concurrent_saves_do_not_duplicate_owner(tmp_path):
+    async def scenario(db):
+        # живые проверки идут параллельно: два подарка одного нового владельца одновременно
+        await asyncio.gather(*(db.save_gifts([gift(f"pop-{n}", Owner(username="new"))]) for n in range(1, 6)))
+        row = await owner_row(db, "new")
+        assert row["gifts_count"] == 5
 
     run(tmp_path, scenario)

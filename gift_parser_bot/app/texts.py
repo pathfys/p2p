@@ -114,11 +114,57 @@ def results(header: str, mode: str, rows: list, total: int, page: int, pages: in
     )
 
 
-def random_gifts(rows: list) -> str:
-    if not rows:
-        return "🎲 <b>Все подарки</b>\n\nБаза пока пустая — запустите парсер командой /admin."
-    cards = "\n\n".join(gift_card(row, i) for i, row in enumerate(rows, start=1))
-    return f"🎲 <b>Все подарки — случайная подборка</b>\n\n{cards}"
+PARSING = "⏳ Парсинг…"
+RANDOM_HEADER = "🎲 Все подарки — случайные люди"
+
+
+def person_card(person: Mapping, index: int) -> str:
+    gift = f'🎁 <a href="https://t.me/nft/{person["slug"]}">{escape(person["title"])} #{person["number"]}</a>'
+    for emoji, field in (("🎨", "backdrop"), ("🧩", "model")):
+        if person[field]:
+            gift += f" · {emoji} {escape(person[field])}"
+    if person.get("matched", 1) > 1:
+        gift += f" · ещё {person['matched'] - 1} подходящих"
+    return f"{index}. {owner_line(person)}\n      {gift}"
+
+
+def timing_line(timing: Mapping) -> str:
+    line = f"⏱ Парсинг: <b>{timing['seconds']:.2f} с</b>"
+    if timing["checked"]:
+        line += f" — база {timing['db_seconds']:.2f} с, проверка t.me/nft {timing['live_seconds']:.2f} с"
+        line += f" ({timing['checked']} стр.)"
+        if timing["replaced"]:
+            line += f", заменено устаревших: {timing['replaced']}"
+    else:
+        line += " (из базы, без живой проверки)"
+    return line
+
+
+def people_page(header: str, mode: str, people: list, page: int, per_page: int, timing: Mapping) -> str:
+    if not people:
+        return f"👥 <b>{header}</b>\n\n{NOTHING_FOUND}"
+    pages = max(1, -(-len(people) // per_page))
+    chunk = people[page * per_page : (page + 1) * per_page]
+    cards = "\n\n".join(person_card(p, i) for i, p in enumerate(chunk, start=page * per_page + 1))
+    return (
+        f"👥 <b>{header}</b>\n"
+        f"Режим: {mode_label(mode)} · стр. {page + 1}/{pages} · людей: <b>{len(people)}</b>\n"
+        f"{timing_line(timing)}\n\n{cards}"
+    )
+
+
+def subscribe_required(channel: str) -> str:
+    return (
+        "🔒 <b>Парсер доступен только подписчикам</b>\n\n"
+        f"1️⃣ Подпишитесь на канал {escape(channel)}\n"
+        "2️⃣ Нажмите «✅ Проверить подписку»\n\n"
+        "После проверки откроется весь функционал бота."
+    )
+
+
+SUBSCRIBE_ALERT = "🔒 Сначала подпишитесь на канал {channel}"
+SUBSCRIBE_FAIL = "❌ Подписка на {channel} не найдена. Подпишитесь и нажмите «Проверить подписку» ещё раз."
+SUBSCRIBE_OK = "✅ Подписка подтверждена!"
 
 
 def filters_summary(filters: Mapping[str, str]) -> str:

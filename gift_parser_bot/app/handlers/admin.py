@@ -13,6 +13,7 @@ from .. import keyboards as kb
 from ..crawler import Crawler
 from ..db import Database
 from ..ratelimit import SPEED_PRESETS
+from ..subscription import SubscriptionChecker
 from ..texts import num
 from .common import safe_edit, spawn
 
@@ -29,7 +30,18 @@ def build_router(admin_ids: frozenset[int]) -> Router:
     return router
 
 
-async def panel_text(crawler: Crawler, db: Database) -> str:
+def subscription_line(checker: SubscriptionChecker | None) -> str:
+    if checker is None or not checker.enabled:
+        return "Обязательная подписка: выкл"
+    if checker.last_error:
+        return (
+            f"Обязательная подписка: {escape(checker.channel)} ⚠️ проверка не работает — сделайте бота "
+            f"администратором канала (<code>{escape(checker.last_error[:200])}</code>)"
+        )
+    return f"Обязательная подписка: {escape(checker.channel)} ✅"
+
+
+async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecker | None = None) -> str:
     st = crawler.status
     stats = await db.stats()
     uptime = f"{(time.time() - st.started_at) / 60:.0f} мин" if st.started_at and crawler.running else "—"
@@ -42,6 +54,7 @@ async def panel_text(crawler: Crawler, db: Database) -> str:
         f"Страниц: {num(st.pages)} · подарков: {num(st.gifts)} · пусто: {num(st.missing)} · ошибок: {num(st.errors)}",
         f"Bot API юзеров: {num(st.users_checked)} · MTProto: {'вкл' if crawler.mtproto else 'выкл'} "
         f"({num(st.owners_enriched)})",
+        subscription_line(checker),
         "",
         f"<b>Скорость: {crawler.preset}</b>",
         *(f"<code>{escape(limiter.describe())}</code>" for limiter in crawler.limiters.values()),
@@ -57,11 +70,15 @@ async def panel_text(crawler: Crawler, db: Database) -> str:
     return "\n".join(lines)
 
 
-async def cmd_admin(message: Message, crawler: Crawler, db: Database) -> None:
-    await message.answer(await panel_text(crawler, db), reply_markup=kb.admin_panel(crawler.running, crawler.preset))
+async def cmd_admin(message: Message, crawler: Crawler, db: Database, checker: SubscriptionChecker) -> None:
+    await message.answer(
+        await panel_text(crawler, db, checker), reply_markup=kb.admin_panel(crawler.running, crawler.preset)
+    )
 
 
-async def cb_admin(call: CallbackQuery, callback_data: kb.AdminCb, crawler: Crawler, db: Database) -> None:
+async def cb_admin(
+    call: CallbackQuery, callback_data: kb.AdminCb, crawler: Crawler, db: Database, checker: SubscriptionChecker
+) -> None:
     action = callback_data.action
     note = ""
     if action == "start":
@@ -83,7 +100,9 @@ async def cb_admin(call: CallbackQuery, callback_data: kb.AdminCb, crawler: Craw
 
         spawn(sync())
     await call.answer(note)
-    await safe_edit(call.message, await panel_text(crawler, db), kb.admin_panel(crawler.running, crawler.preset))
+    await safe_edit(
+        call.message, await panel_text(crawler, db, checker), kb.admin_panel(crawler.running, crawler.preset)
+    )
 
 
 async def cmd_floor(message: Message, command: CommandObject, db: Database) -> None:

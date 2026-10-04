@@ -17,6 +17,7 @@ from dataclasses import dataclass
 # запросов в секунду для каждого источника: (slow, normal, fast)
 SPEED_TABLE: dict[str, tuple[float, float, float]] = {
     "nft_page": (2.0, 5.0, 12.0),  # публичные страницы t.me/nft/<slug>
+    "live": (10.0, 20.0, 30.0),  # те же страницы, но для живой проверки в ответ пользователю
     "fragment": (0.5, 1.0, 2.0),  # fragment.com: список коллекций и floor
     "botapi": (5.0, 15.0, 25.0),  # Bot API getUserGifts
     "mtproto": (0.5, 1.0, 3.0),  # userbot: payments.getSavedStarGifts

@@ -44,8 +44,16 @@ class Settings:
     # Оценка подарка, если floor-цена коллекции неизвестна
     default_gift_ton: float = 3.0
 
+    # Подарки владельца при поиске по @username
     results_per_page: int = 5
-    random_count: int = 8
+    # Выдача людей: по 10 на странице, 2 страницы («След. страница» → «Назад» / «Повторить»)
+    people_per_page: int = 10
+    people_pages: int = 2
+    # Перед выдачей проверять каждого человека живым запросом к t.me/nft (актуальный владелец)
+    live_check: bool = True
+
+    # Обязательная подписка (бот должен быть администратором канала); пусто — без проверки
+    required_channel: str | None = "@fiestagod"
 
     # Опционально: MTProto-аккаунт (Telethon) для payments.getSavedStarGifts
     api_id: int | None = None
@@ -79,7 +87,10 @@ def load_settings() -> Settings:
         tier_rich_ton=float(os.getenv("TIER_RICH_TON", "300")),
         default_gift_ton=float(os.getenv("DEFAULT_GIFT_TON", "3")),
         results_per_page=int(os.getenv("RESULTS_PER_PAGE", "5")),
-        random_count=int(os.getenv("RANDOM_COUNT", "8")),
+        people_per_page=int(os.getenv("PEOPLE_PER_PAGE", "10")),
+        people_pages=int(os.getenv("PEOPLE_PAGES", "2")),
+        live_check=_bool(os.getenv("LIVE_CHECK"), True),
+        required_channel=os.getenv("REQUIRED_CHANNEL", "@fiestagod").strip() or None,
         api_id=int(api_id) if api_id else None,
         api_hash=os.getenv("API_HASH", "").strip() or None,
         mtproto_session=Path(session) if session else Settings.mtproto_session,

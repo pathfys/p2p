@@ -32,6 +32,15 @@ class PageCb(CallbackData, prefix="p"):
     page: int
 
 
+class PeopleCb(CallbackData, prefix="pp"):
+    action: str  # page | repeat
+    page: int = 0
+
+
+class SubCb(CallbackData, prefix="sub"):
+    action: str  # check
+
+
 class AdminCb(CallbackData, prefix="a"):
     action: str  # start | stop | speed | sync | refresh
     value: str = "-"
@@ -128,11 +137,31 @@ def results(page: int, pages: int, back: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def random_gifts() -> InlineKeyboardMarkup:
+def people(page: int, pages: int, back: str) -> InlineKeyboardMarkup:
+    """Стр. 1: «След. страница». Последняя стр.: «Назад» и ниже «Повторить» (новый парсинг)."""
+    rows = []
+    if page < pages - 1:
+        if page > 0:
+            rows.append([_btn("⬅️ Назад", PeopleCb(action="page", page=page - 1))])
+        rows.append([_btn("➡️ След. страница", PeopleCb(action="page", page=page + 1))])
+    else:
+        if page > 0:
+            rows.append([_btn("⬅️ Назад", PeopleCb(action="page", page=page - 1))])
+        rows.append([_btn("🔁 Повторить", PeopleCb(action="repeat"))])
+    if back == "filters":
+        rows.append([_btn("🎛 К фильтрам", MenuCb(action="filters")), _btn("🏠 Меню", MenuCb(action="main"))])
+    elif back == "quick":
+        rows.append([_btn("🔍 Новый поиск", MenuCb(action="quick")), _btn("🏠 Меню", MenuCb(action="main"))])
+    else:
+        rows.append([_btn("🏠 Меню", MenuCb(action="main"))])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def subscribe(url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [_btn("🎲 Ещё подарки", MenuCb(action="random"))],
-            [_btn("🏠 Меню", MenuCb(action="main"))],
+            [InlineKeyboardButton(text="📢 Подписаться", url=url)],
+            [_btn("✅ Проверить подписку", SubCb(action="check"))],
         ]
     )
 

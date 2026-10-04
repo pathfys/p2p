@@ -1,4 +1,8 @@
-"""Быстрый поиск, поиск по фильтрам (подарок, фон, модель, узор) и пагинация."""
+"""Быстрый поиск, поиск по фильтрам (подарок, фон, модель, узор) и пагинация.
+
+Результат поиска — люди: 10 на странице, 2 страницы (см. people_view.py).
+Поиск по @username по-прежнему показывает подарки этого владельца постранично.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +22,9 @@ from ..config import Settings
 from ..crawler import Crawler
 from ..db import TIERS, Database, SearchQuery
 from ..parsers.models import normalize_slug
+from ..people import PeopleParser
 from .common import safe_edit
+from .people_view import run_people
 
 router = Router(name="search")
 router.message.filter(F.chat.type == "private")  # в группах не отвечаем на каждое сообщение
@@ -67,7 +73,14 @@ async def cb_quick(call: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(F.text & ~F.text.startswith("/"))
-async def on_text(message: Message, state: FSMContext, db: Database, crawler: Crawler, settings: Settings) -> None:
+async def on_text(
+    message: Message,
+    state: FSMContext,
+    db: Database,
+    crawler: Crawler,
+    people_parser: PeopleParser,
+    settings: Settings,
+) -> None:
     """Любой текст = быстрый поиск (не нужно каждый раз нажимать кнопку)."""
     await state.set_state(None)
     raw = message.text.strip()[:100]
@@ -96,7 +109,17 @@ async def on_text(message: Message, state: FSMContext, db: Database, crawler: Cr
         return
 
     query = SearchQuery(text=raw, tier=tier_of(mode), seed=random.randint(1, 1_000_002))
-    await show_results(message, state, db, settings, query, f"«{escape(raw)}»", mode, edit=False)
+    await run_people(
+        message,
+        state,
+        people_parser,
+        settings,
+        query=query,
+        header=f"«{escape(raw)}»",
+        mode=mode,
+        back="quick",
+        edit=False,
+    )
 
 
 @router.callback_query(kb.PageCb.filter())
@@ -195,7 +218,9 @@ async def cb_reset(call: CallbackQuery, state: FSMContext, db: Database, setting
 
 
 @router.callback_query(kb.FilterCb.filter(F.action == "search"))
-async def cb_search(call: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+async def cb_search(
+    call: CallbackQuery, state: FSMContext, db: Database, people_parser: PeopleParser, settings: Settings
+) -> None:
     filters = (await state.get_data()).get("filters", {})
     mode = await db.get_mode(call.from_user.id)
     query = SearchQuery(
@@ -206,5 +231,15 @@ async def cb_search(call: CallbackQuery, state: FSMContext, db: Database, settin
         tier=tier_of(mode),
         seed=random.randint(1, 1_000_002),
     )
-    await show_results(call.message, state, db, settings, query, texts.filters_summary(filters), mode, back="filters")
-    await call.answer()
+    await call.answer(texts.PARSING)
+    await run_people(
+        call.message,
+        state,
+        people_parser,
+        settings,
+        query=query,
+        header=texts.filters_summary(filters),
+        mode=mode,
+        back="filters",
+        edit=True,
+    )

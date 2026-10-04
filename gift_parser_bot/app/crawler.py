@@ -176,8 +176,8 @@ class Crawler:
             return added, updated
 
     async def fetch_gift(self, slug: str) -> ParsedGift | None:
-        """Живой запрос одного подарка (быстрый поиск по ссылке)."""
-        gift = await self._call("nft_page", fetch_nft, self.session, slug)
+        """Живой запрос одного подарка в ответ пользователю (свой лимитер, не ждёт фоновый парсер)."""
+        gift = await self._call("live", fetch_nft, self.session, slug)
         if gift:
             await self.db.save_gifts([gift])
         return gift
