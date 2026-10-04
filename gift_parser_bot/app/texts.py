@@ -1,0 +1,159 @@
+"""Все тексты бота и форматирование карточек подарков (HTML parse_mode)."""
+
+from __future__ import annotations
+
+from html import escape
+from typing import Mapping
+
+from .config import Settings
+
+MODES: dict[str, tuple[str, str]] = {
+    "light": ("🌱", "Лёгкий"),
+    "medium": ("⚖️", "Средний"),
+    "rich": ("💎", "Rich"),
+    "all": ("🎲", "Все подарки"),
+}
+
+FIELDS: dict[str, tuple[str, str, str]] = {
+    # поле: (эмодзи, название, «любой/любая»)
+    "collection": ("🎁", "Подарок", "любой"),
+    "backdrop": ("🎨", "Фон", "любой"),
+    "model": ("🧩", "Модель", "любая"),
+    "symbol": ("🔣", "Узор", "любой"),
+}
+
+
+def num(value: float | int | None) -> str:
+    return f"{value or 0:,.0f}".replace(",", " ")
+
+
+def mode_label(mode: str) -> str:
+    emoji, label = MODES.get(mode, MODES["all"])
+    return f"{emoji} {label}"
+
+
+def mode_hint(mode: str, s: Settings) -> str:
+    return {
+        "light": f"🌱 Лёгкий: владельцы с портфелем до {num(s.tier_medium_ton)} TON",
+        "medium": f"⚖️ Средний: портфель от {num(s.tier_medium_ton)} до {num(s.tier_rich_ton)} TON",
+        "rich": f"💎 Rich: портфель от {num(s.tier_rich_ton)} TON, самые богатые — первыми",
+        "all": "🎲 Все подарки: любые владельцы, случайный порядок",
+    }[mode]
+
+
+def welcome(name: str | None, stats: Mapping[str, int]) -> str:
+    return (
+        f"👋 Привет, <b>{escape(name or 'друг')}</b>!\n\n"
+        "🎁 <b>Gift Parser</b> — бот для поиска коллекционных подарков Telegram (NFT) и их владельцев.\n\n"
+        "<b>Что я умею:</b>\n"
+        "🔍 <b>Быстрый поиск</b> — пришлите название подарка, ссылку <code>t.me/nft/…</code> "
+        "или <code>@username</code>\n"
+        "🎛 <b>По фильтрам</b> — подарок, фон, модель и узор\n"
+        "🌱 <b>Лёгкий</b> · ⚖️ <b>Средний</b> · 💎 <b>Rich</b> — уровень владельцев в выдаче\n"
+        "🎲 <b>Все подарки</b> — случайная подборка из всей базы\n\n"
+        f"📦 В базе: <b>{num(stats.get('gifts'))}</b> подарков · <b>{num(stats.get('owners'))}</b> владельцев · "
+        f"<b>{num(stats.get('collections'))}</b> коллекций\n\n"
+        "Выберите действие 👇"
+    )
+
+
+QUICK_PROMPT = (
+    "🔍 <b>Быстрый поиск</b>\n\n"
+    "Отправьте одним сообщением:\n"
+    "• название подарка, модели, фона или узора — <code>Plush Pepe</code>, <code>Onyx Black</code>\n"
+    "• несколько слов сразу — <code>Durov's Cap Black</code>\n"
+    "• ссылку на подарок — <code>t.me/nft/PlushPepe-1</code>\n"
+    "• владельца — <code>@username</code>"
+)
+
+NOTHING_FOUND = (
+    "😔 Ничего не найдено.\n\nПопробуйте другой режим или ослабьте фильтры — база постоянно пополняется парсером."
+)
+SEARCH_EXPIRED = "Этот поиск устарел — запустите его заново."
+GIFT_NOT_FOUND = "😔 Такого подарка нет: проверьте название и номер в ссылке."
+
+
+def rarity(permille: int | None) -> str:
+    return f" · {permille / 10:g}%" if permille else ""
+
+
+def owner_line(row: Mapping) -> str:
+    if row["username"]:
+        who = f"@{escape(row['username'])}"
+    elif row["user_id"] and row["o_name"]:
+        who = f'<a href="tg://user?id={row["user_id"]}">{escape(row["o_name"])}</a>'
+    elif row["ton_address"]:
+        addr = row["ton_address"]
+        who = f"<code>{escape(addr[:6])}…{escape(addr[-4:])}</code> (TON-кошелёк)"
+    elif row["owner_name"]:
+        who = f"{escape(row['owner_name'])} (без юзернейма)"
+    else:
+        return "👤 владелец скрыт"
+    if row["tier"] and row["gifts_count"]:
+        who += f" · {mode_label(row['tier'])} · {row['gifts_count']} NFT · ≈{num(row['value_ton'])} TON"
+    return f"👤 {who}"
+
+
+def gift_card(row: Mapping, index: int | None = None) -> str:
+    prefix = f"{index}. " if index is not None else ""
+    lines = [f'{prefix}🎁 <b><a href="https://t.me/nft/{row["slug"]}">{escape(row["title"])} #{row["number"]}</a></b>']
+    for label, field in (("Модель", "model"), ("Фон", "backdrop"), ("Узор", "symbol")):
+        if row[field]:
+            lines.append(f"├ {label}: {escape(row[field])}{rarity(row[field + '_rarity'])}")
+    lines.append(f"└ {owner_line(row)}")
+    return "\n".join(lines)
+
+
+def results(header: str, mode: str, rows: list, total: int, page: int, pages: int) -> str:
+    if not rows:
+        return f"🔍 <b>{header}</b>\n\n{NOTHING_FOUND}"
+    cards = "\n\n".join(gift_card(row, i) for i, row in enumerate(rows, start=1))
+    return (
+        f"🔍 <b>{header}</b>\n"
+        f"Режим: {mode_label(mode)} · найдено: <b>{num(total)}</b> · стр. {page + 1}/{pages}\n\n{cards}"
+    )
+
+
+def random_gifts(rows: list) -> str:
+    if not rows:
+        return "🎲 <b>Все подарки</b>\n\nБаза пока пустая — запустите парсер командой /admin."
+    cards = "\n\n".join(gift_card(row, i) for i, row in enumerate(rows, start=1))
+    return f"🎲 <b>Все подарки — случайная подборка</b>\n\n{cards}"
+
+
+def filters_summary(filters: Mapping[str, str]) -> str:
+    parts = []
+    for field, (emoji, _, _) in FIELDS.items():
+        if filters.get(field):
+            value = filters.get(f"{field}_title") or filters[field]
+            parts.append(f"{emoji} {escape(value)}")
+    return "Поиск: " + (" · ".join(parts) if parts else "все подарки")
+
+
+def filters_panel(filters: Mapping[str, str], mode: str, s: Settings) -> str:
+    lines = ["🎛 <b>Поиск по фильтрам</b>\n"]
+    for field, (emoji, label, any_word) in FIELDS.items():
+        value = filters.get(f"{field}_title") or filters.get(field)
+        lines.append(f"{emoji} {label}: <b>{escape(value) if value else any_word}</b>")
+    lines.append(f"\nРежим: <b>{mode_label(mode)}</b>\n<i>{mode_hint(mode, s)}</i>")
+    lines.append("\nЗадайте нужные фильтры и нажмите «🔎 Найти».")
+    return "\n".join(lines)
+
+
+def picker_title(field: str, page: int, pages: int) -> str:
+    emoji, label, _ = FIELDS[field]
+    return f"{emoji} <b>Выберите: {label.lower()}</b>  (стр. {page + 1}/{pages})"
+
+
+def stats_text(stats: Mapping[str, int], s: Settings) -> str:
+    return (
+        "📊 <b>Статистика базы</b>\n\n"
+        f"🎁 Подарков: <b>{num(stats.get('gifts'))}</b>\n"
+        f"👥 Владельцев: <b>{num(stats.get('owners'))}</b>\n"
+        f"    🌱 {num(stats.get('light'))} · ⚖️ {num(stats.get('medium'))} · 💎 {num(stats.get('rich'))}\n"
+        f"🗂 Коллекций: <b>{num(stats.get('collections'))}</b>\n"
+        f"🙋 Пользователей бота: <b>{num(stats.get('users'))}</b>\n\n"
+        f"<i>Режимы по оценке всех NFT владельца (floor с Fragment):\n"
+        f"🌱 до {num(s.tier_medium_ton)} TON · ⚖️ {num(s.tier_medium_ton)}–{num(s.tier_rich_ton)} TON · "
+        f"💎 от {num(s.tier_rich_ton)} TON</i>"
+    )

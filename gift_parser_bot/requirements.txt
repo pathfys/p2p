@@ -1,0 +1,4 @@
+aiogram>=3.31,<4      # Bot API 10.3: getUserGifts / getChatGifts
+aiosqlite>=0.20
+python-dotenv>=1.0
+telethon>=1.45        # опционально: MTProto-источник (layer 229)

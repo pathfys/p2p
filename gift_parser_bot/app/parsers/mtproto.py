@@ -1,0 +1,105 @@
+"""Источник №4 (опционально): MTProto-аккаунт через Telethon.
+
+payments.getSavedStarGifts отдаёт все подарки любого пользователя или канала по
+@username — то, что бот через Bot API сделать не может (ему нужен user_id).
+Минус: resolveUsername у Telegram сильно лимитирован (FLOOD_WAIT), поэтому этот
+источник медленный — используется для точечных запросов «@username» и для
+постепенного дообогащения самых богатых владельцев.
+
+Включается, если в .env заданы API_ID и API_HASH (https://my.telegram.org),
+а сессия авторизована командой:  python -m app.login
+"""
+
+from __future__ import annotations
+
+import logging
+
+from ..ratelimit import RateLimiter
+from .models import Owner, ParsedGift, Portfolio
+
+log = logging.getLogger(__name__)
+
+
+def unique_from_tl(gift) -> ParsedGift:
+    from telethon.tl.types import StarGiftAttributeBackdrop, StarGiftAttributeModel, StarGiftAttributePattern
+
+    parsed = ParsedGift(
+        slug=gift.slug.lower(),
+        title=gift.title,
+        number=gift.num,
+        issued=gift.availability_issued,
+        total=gift.availability_total,
+        source="mtproto",
+    )
+    for attr in gift.attributes:
+        rarity = getattr(getattr(attr, "rarity", None), "permille", None)
+        if isinstance(attr, StarGiftAttributeModel):
+            parsed.model, parsed.model_rarity = attr.name, rarity
+        elif isinstance(attr, StarGiftAttributeBackdrop):
+            parsed.backdrop, parsed.backdrop_rarity = attr.name, rarity
+        elif isinstance(attr, StarGiftAttributePattern):
+            parsed.symbol, parsed.symbol_rarity = attr.name, rarity
+    return parsed
+
+
+class MtprotoSource:
+    def __init__(self, api_id: int, api_hash: str, session_path: str, limiter: RateLimiter):
+        from telethon import TelegramClient
+
+        self.client = TelegramClient(session_path, api_id, api_hash)
+        self.limiter = limiter
+
+    async def start(self) -> None:
+        await self.client.connect()
+        if not await self.client.is_user_authorized():
+            await self.client.disconnect()
+            raise RuntimeError("MTProto-сессия не авторизована: выполните `python -m app.login`")
+
+    async def stop(self) -> None:
+        await self.client.disconnect()
+
+    async def _call(self, request):
+        from telethon.errors import FloodWaitError
+
+        while True:
+            await self.limiter.acquire()
+            try:
+                result = await request()
+            except FloodWaitError as e:
+                log.warning("MTProto FLOOD_WAIT %ss", e.seconds)
+                self.limiter.on_throttle(e.seconds)
+                continue
+            self.limiter.on_success()
+            return result
+
+    async def fetch_portfolio(self, username: str) -> Portfolio | None:
+        """Все уникальные подарки аккаунта. None — юзернейм не существует."""
+        from telethon.errors import RPCError
+        from telethon.tl.functions.payments import GetSavedStarGiftsRequest
+        from telethon.tl.types import StarGiftUnique, User
+
+        try:
+            entity = await self._call(lambda: self.client.get_entity(username))
+        except (ValueError, RPCError) as e:
+            log.info("MTProto: не удалось найти %s: %s", username, e)
+            return None
+
+        owner = Owner(username=getattr(entity, "username", None) or username)
+        if isinstance(entity, User):
+            owner.user_id = entity.id
+            owner.name = " ".join(filter(None, [entity.first_name, entity.last_name])) or None
+        else:
+            owner.name = getattr(entity, "title", None)
+
+        portfolio = Portfolio(owner=owner)
+        peer = await self.client.get_input_entity(entity)
+        offset = ""
+        while True:
+            request = GetSavedStarGiftsRequest(peer=peer, offset=offset, limit=100, exclude_unlimited=True)
+            page = await self._call(lambda: self.client(request))  # noqa: B023 — вызывается сразу
+            for saved in page.gifts:
+                if isinstance(saved.gift, StarGiftUnique) and not saved.gift.burned:
+                    portfolio.gifts.append(unique_from_tl(saved.gift))
+            if not page.next_offset:
+                return portfolio
+            offset = page.next_offset
