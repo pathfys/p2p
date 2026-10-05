@@ -41,7 +41,7 @@
   background: var(--acid); color: var(--acid-ink);
   border-color: var(--acid);
   font-weight: 750;
-  box-shadow: 0 8px 26px -14px rgba(212,255,63,.75);
+  box-shadow: 0 8px 26px -14px rgba(var(--acid-rgb),.55);
 }
 .btn-buy  { background: var(--buy);  color: #04150e; border-color: var(--buy); font-weight: 750; }
 .btn-sell { background: var(--sell); color: #1b0407; border-color: var(--sell); font-weight: 750; }

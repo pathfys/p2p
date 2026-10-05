@@ -1,0 +1,222 @@
+/* =========================================================
+   Загрузочный экран «P2P Light»
+   Кошелёк — позади надписи, карты разлетаются влево и вправо.
+   ========================================================= */
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(78% 52% at 50% 42%, rgba(var(--acid-rgb), .20), transparent 68%),
+    radial-gradient(120% 80% at 50% 118%, rgba(var(--acid-rgb), .10), transparent 60%),
+    #000;
+  /* на светлой теме сплэш всё равно чёрный — это заставка бренда */
+  color: #fff;
+  transition: opacity .5s var(--ease), transform .5s var(--ease);
+}
+#splash::after {
+  content: "";
+  position: absolute; inset: 0;
+  background-image: var(--grain);
+  opacity: .05;
+  pointer-events: none;
+}
+#splash.is-gone {
+  opacity: 0;
+  transform: scale(1.06);
+  pointer-events: none;
+}
+
+/* тонкая сетка-подложка, как в терминале */
+#splash::before {
+  content: "";
+  position: absolute; inset: -10%;
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(70% 55% at 50% 45%, #000 20%, transparent 78%);
+  pointer-events: none;
+}
+
+.sp-stage {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  height: min(58vh, 430px);
+  display: grid;
+  place-items: center;
+}
+
+/* ---------- кошелёк: позади надписи ---------- */
+.sp-wallet {
+  position: absolute;
+  width: min(54vw, 238px);
+  height: auto;
+  z-index: 1;
+  transform: translateY(2%);
+  filter: drop-shadow(0 26px 44px rgba(0, 0, 0, .65));
+  animation: sp-wallet-in 1s var(--ease-out) both;
+}
+.sp-wallet-glow {
+  position: absolute;
+  z-index: 0;
+  width: min(74vw, 330px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--acid-rgb), .34), transparent 66%);
+  filter: blur(26px);
+  animation: sp-glow 3.4s var(--ease) infinite;
+}
+@keyframes sp-wallet-in {
+  from { opacity: 0; transform: translateY(12%) scale(.78); }
+  to   { opacity: .95; transform: translateY(2%) scale(1); }
+}
+@keyframes sp-glow {
+  0%, 100% { opacity: .75; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.09); }
+}
+
+/* ---------- надпись ---------- */
+.sp-word {
+  position: relative;
+  z-index: 3;
+  text-align: center;
+  line-height: .9;
+}
+.sp-word::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 150%; height: 190%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, rgba(0,0,0,.58), rgba(0,0,0,.28) 58%, transparent 78%);
+  z-index: -1;
+  pointer-events: none;
+}
+.sp-p2p {
+  display: flex;
+  justify-content: center;
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-stretch: 122%;
+  font-size: clamp(88px, 30vw, 184px);
+  letter-spacing: -.045em;
+  color: #fff;
+  text-shadow:
+    0 2px 0 rgba(0,0,0,.3),
+    0 18px 44px rgba(0,0,0,.75),
+    0 0 72px rgba(var(--acid-rgb), .45);
+}
+.sp-p2p span {
+  display: inline-block;
+  animation: sp-char 0.72s var(--ease-out) both;
+  animation-delay: calc(240ms + var(--i) * 110ms);
+}
+.sp-p2p span.accent { color: var(--acid); }
+@keyframes sp-char {
+  from { opacity: 0; transform: translateY(34px) rotate(-5deg); }
+  to   { opacity: 1; transform: none; }
+}
+
+.sp-light {
+  margin-top: 6px;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-stretch: 112%;
+  font-size: clamp(13px, 4.2vw, 19px);
+  letter-spacing: .62em;
+  text-indent: .62em;            /* компенсировать трекинг справа */
+  text-transform: uppercase;
+  color: var(--acid);
+  animation: sp-fade .7s var(--ease-out) both;
+  animation-delay: .66s;
+}
+
+/* ---------- карты по сторонам ---------- */
+.sp-card {
+  position: absolute;
+  z-index: 2;
+  height: auto;
+  filter: drop-shadow(0 22px 34px rgba(0, 0, 0, .6));
+  will-change: transform;
+}
+.sp-card.left {
+  width: min(42vw, 198px);
+  left: max(-11vw, -58px);
+  top: 54%;
+  animation: sp-left 1.05s var(--ease-out) both;
+  animation-delay: .12s;
+}
+.sp-card.right {
+  width: min(46vw, 214px);
+  right: max(-12vw, -64px);
+  top: 7%;
+  animation: sp-right 1.05s var(--ease-out) both;
+  animation-delay: .22s;
+}
+@keyframes sp-left {
+  from { opacity: 0; transform: translate(-70%, 10%) rotate(-38deg) scale(.86); }
+  to   { opacity: 1; transform: translate(0, -6%) rotate(-17deg); }
+}
+@keyframes sp-right {
+  from { opacity: 0; transform: translate(70%, -10%) rotate(40deg) scale(.86); }
+  to   { opacity: 1; transform: translate(0, 0) rotate(15deg); }
+}
+
+/* ---------- низ: прогресс ---------- */
+.sp-foot {
+  position: relative;
+  z-index: 3;
+  width: min(84vw, 320px);
+  margin-top: clamp(18px, 5vh, 40px);
+  text-align: center;
+}
+.sp-bar {
+  height: 3px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, .12);
+  overflow: hidden;
+}
+.sp-bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--acid-dim), var(--acid));
+  box-shadow: 0 0 16px rgba(var(--acid-rgb), .7);
+  transition: width .45s var(--ease-out);
+}
+.sp-hint {
+  margin-top: 11px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .08em;
+  color: rgba(255, 255, 255, .5);
+  min-height: 15px;
+  animation: sp-fade .6s var(--ease) both;
+  animation-delay: .5s;
+}
+.sp-brand {
+  position: absolute;
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  left: 0; right: 0;
+  z-index: 3;
+  text-align: center;
+  font-size: 9.5px;
+  letter-spacing: .26em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .3);
+  animation: sp-fade .6s var(--ease) both;
+  animation-delay: .9s;
+}
+@keyframes sp-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  #splash * { animation-duration: .01ms !important; }
+}

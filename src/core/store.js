@@ -4,6 +4,7 @@
  */
 import { uid } from './format.js';
 
+// ключ не переименовываем вслед за продуктом — иначе у всех слетит сохранённое состояние
 const LS_KEY = 'p2pdesk.state.v1';
 const PERSIST = ['balance', 'cards', 'settings', 'kyc', 'purchases', 'ui', 'filters', 'profile', 'stats'];
 
@@ -67,7 +68,7 @@ function defaults() {
 
     settings: {
       // connection
-      wsUrl: 'wss://api.p2pdesk.local/v1/stream',
+      wsUrl: 'wss://api.p2plight.local/v1/stream',
       feedMode: 'mock',        // mock | live
       autoReconnect: true,
       throttleMs: 450,

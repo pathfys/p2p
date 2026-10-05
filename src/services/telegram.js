@@ -13,8 +13,8 @@ export function initTelegram() {
     tg.ready();
     tg.expand();
     if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
-    if (tg.setHeaderColor) tg.setHeaderColor('#0a0c0d');
-    if (tg.setBackgroundColor) tg.setBackgroundColor('#0a0c0d');
+    if (tg.setHeaderColor) tg.setHeaderColor('#0b0c0f');
+    if (tg.setBackgroundColor) tg.setBackgroundColor('#0b0c0f');
 
     const u = tg.initDataUnsafe?.user;
     if (u) {

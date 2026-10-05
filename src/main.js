@@ -1,5 +1,5 @@
 /**
- * P2PDesk — AI-терминал P2P-стаканов (Telegram Mini App / web).
+ * P2P Light — AI-терминал P2P-стаканов (Telegram Mini App / web).
  * Bootstrap: тема → Telegram → экраны → фид.
  */
 import { state, set, on, rollDay } from './core/store.js';
@@ -12,22 +12,27 @@ import { P2PScreen } from './screens/p2p.js';
 import { SettingsScreen } from './screens/settings.js';
 import { ProfileScreen } from './screens/profile.js';
 import { closeTopSheet, sheetOpen } from './ui/sheet.js';
+import { splashStep, splashDone, splashGuard } from './ui/splash.js';
 import { qs } from './core/dom.js';
 
 /* ---------- theme ---------- */
 function applyTheme() {
   const t = state.settings.theme === 'light' ? 'light' : 'dark';
   document.documentElement.dataset.theme = t;
-  qs('meta[name="theme-color"]')?.setAttribute('content', t === 'light' ? '#f2f3ef' : '#0a0c0d');
+  qs('meta[name="theme-color"]')?.setAttribute('content', t === 'light' ? '#ffffff' : '#0b0c0f');
 }
 
 /* ---------- boot ---------- */
 function boot() {
+  splashStep(0);
+  splashGuard();                     // сплэш не должен залипнуть, если старт упадёт
+
   applyTheme();
   on('settings', applyTheme);
 
   initTelegram();
   rollDay();
+  splashStep(1);
 
   if (state.settings.hideBalanceDefault) set('ui', (u) => { u.balanceHidden = true; });
 
@@ -38,8 +43,13 @@ function boot() {
 
   renderTabbar();
   navigate(state.ui.tab || 'home');
+  splashStep(2);
 
-  log('info', 'sys', `P2PDesk запущен · ${inTelegram ? 'Telegram Mini App' : 'браузер'}`);
+  log('info', 'sys', `P2P Light запущен · ${inTelegram ? 'Telegram Mini App' : 'браузер'}`);
+
+  // прячем заставку, когда стаканы реально приехали
+  const off = on('offers', () => { off(); splashDone(); });
+  splashStep(3);
   startFeed();
 
   // Esc / browser back closes the top sheet
@@ -53,7 +63,7 @@ function boot() {
   });
 
   if (!inTelegram) {
-    console.info('%cP2PDesk', 'color:#d4ff3f;font-weight:700',
+    console.info('%cP2P Light', 'color:#f7a600;font-weight:700',
       'запущен вне Telegram — SDK в режиме заглушки, фид в режиме', state.settings.feedMode);
   }
 }

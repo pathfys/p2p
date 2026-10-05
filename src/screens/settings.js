@@ -248,7 +248,7 @@ export function SettingsScreen() {
       onClick: (e) => {
         set('settings', (s) => { s.theme = v; });
         document.documentElement.dataset.theme = v;
-        document.querySelector('meta[name=theme-color]')?.setAttribute('content', v === 'light' ? '#f2f3ef' : '#0a0c0d');
+        document.querySelector('meta[name=theme-color]')?.setAttribute('content', v === 'light' ? '#ffffff' : '#0b0c0f');
         for (const b of e.target.parentNode.children) b.setAttribute('aria-pressed', 'false');
         e.target.setAttribute('aria-pressed', 'true');
       },
@@ -272,7 +272,7 @@ export function SettingsScreen() {
         const blob = new Blob([exportState()], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `p2pdesk-config-${Date.now()}.json`;
+        a.download = `p2p-light-config-${Date.now()}.json`;
         a.click();
         URL.revokeObjectURL(a.href);
         toast('Конфигурация выгружена', 'JSON со настройками, картами и KYC', 'ok');
@@ -335,7 +335,7 @@ export function SettingsScreen() {
     h('div', { style: { '--i': 11 } }, appearance),
     title('Данные', 12),
     h('div', { style: { '--i': 13 } }, data),
-    h('div.foot-note', `P2PDesk · сборка фронтенда · ${compact(Object.keys(state.offers).length)} оферов в памяти`),
+    h('div.foot-note', `P2P Light · сборка фронтенда · ${compact(Object.keys(state.offers).length)} оферов в памяти`),
   );
 
   return { node: root, destroy: () => unsubs.forEach((u) => u()) };

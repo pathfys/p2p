@@ -1,39 +1,40 @@
 /* ========================================================================
-   P2PDesk — design tokens
-   Aesthetic: "terminal industrial" — graphite panels, hairline rules,
-   acid-lime signal accent, tabular mono numerics.
+   P2P Light — design tokens
+   Палитра Bybit: оранжевый #F7A600, чёрный, белый.
+   Торговые цвета — фирменные bybit: рост #20B26C, падение #EF454A.
    ======================================================================== */
 
 :root {
   /* ---- surfaces ---- */
-  --bg:          #0a0c0d;
-  --bg-deep:     #060809;
-  --panel:       #101416;
-  --panel-2:     #161b1e;
-  --panel-3:     #1d2429;
-  --line:        #232b2f;
-  --line-soft:   #1a2023;
+  --bg:          #0b0c0f;
+  --bg-deep:     #050609;
+  --panel:       #16181d;
+  --panel-2:     #1c1f26;
+  --panel-3:     #252932;
+  --line:        #2b303a;
+  --line-soft:   #21252d;
 
   /* ---- ink ---- */
-  --ink:         #e9efec;
-  --ink-2:       #b4c2bf;
-  --ink-3:       #7d8d8a;
-  --ink-4:       #4d5a58;
+  --ink:         #ffffff;
+  --ink-2:       #c9ced9;
+  --ink-3:       #8a93a5;
+  --ink-4:       #5a6475;
 
-  /* ---- signal ---- */
-  --acid:        #d4ff3f;
-  --acid-dim:    #a8cc2f;
-  --acid-ghost:  rgba(212, 255, 63, 0.12);
-  --acid-ink:    #0a0c0d;
+  /* ---- signal (brand) ---- */
+  --acid:        #f7a600;
+  --acid-dim:    #c98700;
+  --acid-ghost:  rgba(247, 166, 0, 0.14);
+  --acid-rgb:    247, 166, 0;
+  --acid-ink:    #0b0c0f;
 
-  --buy:         #19c98a;
-  --buy-ghost:   rgba(25, 201, 138, 0.13);
-  --sell:        #ff4d61;
-  --sell-ghost:  rgba(255, 77, 97, 0.13);
-  --warn:        #ffb020;
-  --warn-ghost:  rgba(255, 176, 32, 0.13);
-  --info:        #4ea8ff;
-  --info-ghost:  rgba(78, 168, 255, 0.13);
+  --buy:         #20b26c;
+  --buy-ghost:   rgba(32, 178, 108, 0.14);
+  --sell:        #ef454a;
+  --sell-ghost:  rgba(239, 69, 74, 0.14);
+  --warn:        #ffc53d;
+  --warn-ghost:  rgba(255, 197, 61, 0.14);
+  --info:        #4895ff;
+  --info-ghost:  rgba(72, 149, 255, 0.14);
 
   /* ---- type ---- */
   --font-ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
@@ -48,43 +49,42 @@
   --tabbar-h: 68px;
   --topbar-h: 54px;
 
-  --shadow-1: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px -12px rgba(0,0,0,.8);
-  --shadow-2: 0 24px 60px -20px rgba(0,0,0,.9);
-  --shadow-acid: 0 0 0 1px var(--acid-dim), 0 8px 32px -10px rgba(212,255,63,.35);
+  --shadow-1: 0 1px 0 rgba(255,255,255,.035) inset, 0 8px 24px -12px rgba(0,0,0,.85);
+  --shadow-2: 0 24px 60px -20px rgba(0,0,0,.92);
+  --shadow-acid: 0 0 0 1px var(--acid-dim), 0 8px 32px -10px rgba(var(--acid-rgb), .4);
 
   --ease: cubic-bezier(.22,.61,.36,1);
   --ease-out: cubic-bezier(.16,1,.3,1);
 
-  /* grain + grid textures */
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
 }
 
 /* ------------------------------ light theme ------------------------------ */
 :root[data-theme="light"] {
-  --bg:          #f2f3ef;
-  --bg-deep:     #e6e8e2;
+  --bg:          #ffffff;
+  --bg-deep:     #f4f5f7;
   --panel:       #ffffff;
-  --panel-2:     #f7f8f4;
-  --panel-3:     #eceee7;
-  --line:        #d9ddd3;
-  --line-soft:   #e6e9e1;
+  --panel-2:     #f7f8fa;
+  --panel-3:     #edeff3;
+  --line:        #e1e4ea;
+  --line-soft:   #eceef2;
 
-  --ink:         #0d1011;
-  --ink-2:       #3b4442;
-  --ink-3:       #6b7572;
-  --ink-4:       #9aa4a1;
+  --ink:         #121214;
+  --ink-2:       #3f4654;
+  --ink-3:       #6b7280;
+  --ink-4:       #9aa2b1;
 
-  --acid:        #b8e600;
-  --acid-dim:    #8fb300;
-  --acid-ghost:  rgba(143, 179, 0, 0.14);
-  --acid-ink:    #11160a;
+  --acid:        #f7a600;
+  --acid-dim:    #d18d00;
+  --acid-ghost:  rgba(247, 166, 0, 0.16);
+  --acid-ink:    #16120a;
 
-  --buy:         #0f9c69;
-  --sell:        #e02441;
-  --warn:        #b97400;
+  --buy:         #0f9d6b;
+  --sell:        #e03a40;
+  --warn:        #b97a00;
   --info:        #1d6fd0;
 
-  --shadow-1: 0 1px 2px rgba(13,16,17,.06), 0 8px 20px -14px rgba(13,16,17,.28);
-  --shadow-2: 0 24px 60px -24px rgba(13,16,17,.3);
-  --shadow-acid: 0 0 0 1px var(--acid-dim), 0 8px 28px -12px rgba(143,179,0,.4);
+  --shadow-1: 0 1px 2px rgba(18,18,20,.06), 0 8px 20px -14px rgba(18,18,20,.26);
+  --shadow-2: 0 24px 60px -24px rgba(18,18,20,.28);
+  --shadow-acid: 0 0 0 1px var(--acid-dim), 0 8px 28px -12px rgba(var(--acid-rgb), .45);
 }

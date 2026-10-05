@@ -117,7 +117,7 @@ ul, ol { list-style: none; }
   font-weight: 800;
   font-size: 13px;
   font-stretch: 120%;
-  box-shadow: 0 0 20px -4px rgba(212,255,63,.5);
+  box-shadow: 0 0 20px -4px rgba(var(--acid-rgb),.55);
 }
 :root[data-theme="light"] .brand-mark { box-shadow: none; }
 .brand-name { font-size: 15px; }

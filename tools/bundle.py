@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Собирает P2PDesk в один самодостаточный index.html:
+Собирает P2P Light в один самодостаточный index.html:
   - 4 CSS-файла → <style>
   - граф ES-модулей → один <script> с крошечным рантайм-реестром
   - PNG монет → data: URI
@@ -11,31 +11,39 @@ import re, os, json, base64, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'dist', 'index.html')
 
-CSS = ['styles/tokens.css', 'styles/base.css', 'styles/components.css', 'styles/screens.css']
+CSS = ['styles/tokens.css', 'styles/base.css', 'styles/components.css',
+       'styles/screens.css', 'styles/splash.css']
 ENTRY = 'src/main.js'
 
 # ---------- изображения → data URI ----------
 # для встраивания берём уменьшенную копию, если она меньше оригинала
-SHRUNK = os.path.join(ROOT, 'assets/coins/min')   # предсжатые копии для встраивания
+MIME = {'.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml'}
 
-def best_bytes(name):
-    orig = os.path.join(ROOT, 'assets/coins', name)
+def best_bytes(rel):
+    """Путь к ассету → самые лёгкие байты (учитывая предсжатые копии в coins/min)."""
+    orig = os.path.join(ROOT, rel)
     cand = [orig]
-    small = os.path.join(SHRUNK, name)
-    if os.path.exists(small):
+    small = os.path.join(ROOT, 'assets/coins/min', os.path.basename(rel))
+    if rel.startswith('assets/coins/') and os.path.exists(small):
         cand.append(small)
     pick = min(cand, key=os.path.getsize)
     with open(pick, 'rb') as f:
-        return f.read(), pick
+        return f.read()
 
 IMAGES = {}
 saved = 0
-for name in sorted(os.listdir(os.path.join(ROOT, 'assets/coins'))):
-    if not name.endswith('.png'):
-        continue
-    raw, pick = best_bytes(name)
-    saved += os.path.getsize(os.path.join(ROOT, 'assets/coins', name)) - len(raw)
-    IMAGES['./assets/coins/' + name] = 'data:image/png;base64,' + base64.b64encode(raw).decode()
+for folder, _, files in os.walk(os.path.join(ROOT, 'assets')):
+    rel_dir = os.path.relpath(folder, ROOT).replace(os.sep, '/')
+    if rel_dir.endswith('/min'):
+        continue                      # служебная папка предсжатых копий
+    for name in sorted(files):
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in MIME:
+            continue
+        rel = f'{rel_dir}/{name}'
+        raw = best_bytes(rel)
+        saved += os.path.getsize(os.path.join(ROOT, rel)) - len(raw)
+        IMAGES['./' + rel] = f'data:{MIME[ext]};base64,' + base64.b64encode(raw).decode()
 
 def inline_images(src):
     for ref, uri in IMAGES.items():
@@ -146,8 +154,9 @@ html = re.sub(r'\n?\s*<link rel="stylesheet" href="\./styles/[^"]+">', '', html)
 html = html.replace('<script type="module" src="./src/main.js"></script>',
                     '<script>\n' + js + '</script>')
 html = html.replace('</head>', '<style>\n' + css + '\n</style>\n</head>')
-html = html.replace('<title>P2PDesk — AI P2P Terminal</title>',
-                    '<title>P2PDesk — AI P2P Terminal</title>\n'
+html = inline_images(html)
+html = html.replace('<title>P2P Light — AI P2P Terminal</title>',
+                    '<title>P2P Light — AI P2P Terminal</title>\n'
                     '<!-- Self-contained сборка: CSS, JS и иконки монет встроены в этот файл.\n'
                     '     Внешние зависимости только две: Google Fonts и Telegram WebApp SDK.\n'
                     '     Исходники: github.com/pathfys/p2p -->')

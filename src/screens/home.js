@@ -48,7 +48,7 @@ export function HomeScreen() {
     wrap(cardsSlot, 5),
     sectionTitle('Закупки', 6, h('button.btn.btn-xs.btn-ghost', { onClick: () => navigate('p2p') }, 'К стаканам', icon('chev'))),
     wrap(dealsSlot, 7),
-    h('div.foot-note', 'P2PDesk · агрегатор P2P-стаканов · данные обновляются в реальном времени во вкладке P2P'),
+    h('div.foot-note', 'P2P Light · агрегатор P2P-стаканов · данные обновляются в реальном времени во вкладке P2P'),
   );
 
   return { node: root, destroy: () => unsubs.forEach((u) => u()) };
@@ -108,7 +108,7 @@ function hero() {
   const el = h(`div.hero${hidden ? '.balance-hidden' : ''}`,
     h('div.hero-top',
       h('span.eyebrow', 'Баланс кошелька'),
-      b.locked > 0 ? h('span.badge.badge-warn', icon('clock'), `${fmtN(b.locked, 2)} в эскроу`) : null,
+      b.locked > 0 ? h('span.badge.badge-warn', icon('clock'), `эскроу ${fmt0(b.locked)}`) : null,
       h('span.badge.badge-acid', icon('cpu'), 'ai on'),
     ),
     h('button.balance-tap', {
