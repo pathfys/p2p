@@ -141,6 +141,25 @@
 }
 .pay-card.add svg { width: 20px; height: 20px; }
 .pay-card.add span { font-size: 11px; font-weight: 600; }
+/* единственная плитка, когда карт ещё нет */
+.pay-card.add.empty {
+  flex: none;
+  width: 100%;
+  height: 118px;
+  gap: 9px;
+  color: var(--ink-2);
+  background:
+    radial-gradient(130% 100% at 50% 0%, var(--acid-ghost), transparent 62%),
+    linear-gradient(145deg, var(--panel-2), var(--panel));
+}
+.pay-card.add.empty::before { display: none; }
+.pay-card.add.empty svg {
+  width: 26px; height: 26px;
+  color: var(--acid);
+  stroke-width: 2.1;
+}
+.pay-card.add.empty span { font-size: 13px; font-weight: 650; }
+.pay-card.add.empty:active { transform: scale(.99); }
 
 /* =========================================================
    P2P — exchange status strip
@@ -168,6 +187,52 @@
    P2P — order book (стакан)
    ========================================================= */
 .book { position: relative; }
+
+/* --- поиск по стакану --- */
+.book-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+.book-search:focus-within { background: var(--panel-3); }
+.book-search-ico { width: 15px; height: 15px; color: var(--ink-4); flex: 0 0 auto; }
+.book-search input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  background: none;
+  border: none;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-family: var(--font-mono);
+}
+.book-search input::placeholder { color: var(--ink-4); font-family: var(--font-ui); }
+.book-search input::-webkit-search-decoration,
+.book-search input::-webkit-search-cancel-button { appearance: none; }
+.book-search-clear {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 6px;
+  color: var(--ink-3);
+  background: var(--panel-3);
+}
+.book-search-clear svg { width: 13px; height: 13px; }
+.book-search-clear:active { transform: scale(.92); }
+
+/* подсветка совпадений */
+mark.hl {
+  background: var(--acid);
+  color: var(--acid-ink);
+  border-radius: 3px;
+  padding: 0 1px;
+  margin: 0 -1px;
+  font-weight: 700;
+}
+
 .book-head {
   display: grid;
   grid-template-columns: 1fr 86px 68px;

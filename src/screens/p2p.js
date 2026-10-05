@@ -82,6 +82,38 @@ export function P2PScreen({ slot }) {
   const logBarSlot = h('div.console-bar');
   const sortLabel = h('span', SORTS.find((s) => s.id === state.filters.sort)?.label || 'Цена');
 
+  /* ---- поиск по стакану (подсветка совпадений) ---- */
+  let searchTerm = '';                 // всегда в нижнем регистре
+  const searchCount = h('span.t-xs.mono.t-muted');
+
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  /** Экранированный HTML с обёрнутыми <mark> совпадениями. term уже в нижнем регистре. */
+  function hlHTML(text, term) {
+    const t = String(text);
+    const low = t.toLowerCase();
+    let i = 0, out = '', idx;
+    while ((idx = low.indexOf(term, i)) !== -1) {
+      out += esc(t.slice(i, idx)) + '<mark class="hl">' + esc(t.slice(idx, idx + term.length)) + '</mark>';
+      i = idx + term.length;
+      if (term.length === 0) break;    // страховка
+    }
+    return out + esc(t.slice(i));
+  }
+
+  /**
+   * Пишет текст в узел: быстрый textContent, либо innerHTML с подсветкой.
+   * Безопасно по XSS — текст всегда экранируется, в разметку уходят только <mark>.
+   */
+  function setHL(el, text) {
+    text = String(text);
+    if (el._text === text && el._hlTerm === searchTerm) return;
+    el._text = text; el._hlTerm = searchTerm;
+    if (searchTerm && text.toLowerCase().includes(searchTerm)) el.innerHTML = hlHTML(text, searchTerm);
+    else el.textContent = text;
+  }
+
   /* ---- topbar mode toggle ---- */
   const modeBtn = h('button.btn.btn-xs.btn-ghost', {
     onClick: () => {
@@ -398,7 +430,7 @@ export function P2PScreen({ slot }) {
     const dev = med ? ((o.price - med) / med) * 100 : 0;
     const favourable = state.filters.side === 'buy' ? -dev : dev;
 
-    if (refs.name.textContent !== m.name) refs.name.textContent = m.name;
+    setHL(refs.name, m.name);
 
     const wantVerified = m.verified ? 'v' : '';
     if (refs.verified.dataset.s !== wantVerified) {
@@ -412,9 +444,9 @@ export function P2PScreen({ slot }) {
     }
 
     refs.onlineDot.style.background = m.online ? 'var(--buy)' : 'var(--ink-4)';
-    refs.orders.textContent = String(m.orders);
-    refs.completion.textContent = `${(m.completion * 100).toFixed(1)}%`;
-    refs.release.textContent = `${m.avgReleaseMin}м`;
+    setHL(refs.orders, String(m.orders));
+    setHL(refs.completion, `${(m.completion * 100).toFixed(1)}%`);
+    setHL(refs.release, `${m.avgReleaseMin}м`);
 
     const needKyc = (o.kycRequired || 0) > state.kyc.level;
     const wantKyc = needKyc ? `k${o.kycRequired}` : '';
@@ -429,11 +461,11 @@ export function P2PScreen({ slot }) {
       mount(refs.methods, methodsKey ? o.methods.slice(0, 3).map((mid) => h('span.pm', PM[mid]?.name || mid)) : null);
     }
 
-    refs.price.textContent = fmtN(o.price, 2);
-    refs.dev.textContent = `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`;
+    setHL(refs.price, fmtN(o.price, 2));
+    setHL(refs.dev, `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`);
     refs.dev.style.color = favourable > 0 ? 'var(--buy)' : favourable < 0 ? 'var(--sell)' : 'var(--ink-4)';
-    refs.avail.textContent = compact(o.available);
-    refs.limits.textContent = `${compact(o.min)}–${compact(o.max)}`;
+    setHL(refs.avail, compact(o.available));
+    setHL(refs.limits, `${compact(o.min)}–${compact(o.max)}`);
 
     entry.el.style.setProperty('--depth', `${Math.min(100, (o.available / (maxAvail || 1)) * 100)}%`);
     entry.el.style.setProperty('--depth-c', state.filters.side === 'buy' ? 'var(--buy-ghost)' : 'var(--sell-ghost)');
@@ -450,9 +482,29 @@ export function P2PScreen({ slot }) {
   }
 
   /** @param {boolean} force re-sort immediately (filters/volume/market changed) */
+  /** Текст строки, по которому ищем (совпадает с подсвечиваемыми полями). */
+  function offerHay(o) {
+    const med = state.market.median;
+    const dev = med ? ((o.price - med) / med) * 100 : 0;
+    return [
+      o.merchant.name, String(o.merchant.orders), `${(o.merchant.completion * 100).toFixed(1)}%`,
+      `${o.merchant.avgReleaseMin}м`, fmtN(o.price, 2), `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`,
+      compact(o.available), `${compact(o.min)}–${compact(o.max)}`,
+    ].join(' ').toLowerCase();
+  }
+
   function renderBook(force = false) {
     const list = visibleOffers().slice(0, MAX_ROWS);
     bookCount.textContent = `Мерчант · ${list.length} оферов`;
+
+    if (searchTerm) {
+      const n = list.reduce((a, o) => a + (offerHay(o).includes(searchTerm) ? 1 : 0), 0);
+      searchCount.textContent = n ? `${n} совпад.` : 'нет совпадений';
+      searchCount.classList.toggle('t-sell', !n);
+    } else {
+      searchCount.textContent = '';
+      searchCount.classList.remove('t-sell');
+    }
 
     if (!list.length) {
       rows.clear();
@@ -572,10 +624,15 @@ export function P2PScreen({ slot }) {
     });
   }
 
+  // Сообщение лога может содержать подставленные сервером/мерчантом строки.
+  // Экранируем всё, затем возвращаем только <b>/</b> — так имя мерчанта вида
+  // "<img onerror=…>" станет безопасным текстом, а форматирование сохранится.
+  const safeLogHTML = (s) => esc(s).replace(/&lt;(\/?)b&gt;/g, '<$1b>');
+
   const logLine = (e) => h('div.log-line', { class: `lv-${e.level}` },
     h('span.log-ts', hhmmss(e.ts)),
     h('span.log-ex', { style: { color: EX[e.exchange]?.tint || 'var(--ink-3)' } }, EX[e.exchange]?.tag || e.exchange),
-    h('span.log-msg', { html: e.message }),
+    h('span.log-msg', { html: safeLogHTML(e.message) }),
   );
 
   function renderLogs() {
@@ -614,6 +671,38 @@ export function P2PScreen({ slot }) {
     });
   }
 
+  /* ===================== search bar ===================== */
+
+  function searchBar() {
+    const input = h('input', {
+      type: 'search', inputmode: 'search', enterkeyhint: 'search',
+      'aria-label': 'Поиск по стакану', placeholder: 'Поиск по стакану: мерчант, цена, «3»…',
+      maxlength: 32, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+      onInput: (e) => {
+        clearTimeout(input._t);
+        input._t = setTimeout(() => {
+          searchTerm = String(e.target.value).trim().toLowerCase().slice(0, 32);
+          clearBtn.style.display = searchTerm ? '' : 'none';
+          renderBook(true);
+        }, 140);                    // дебаунс: защита UI от ввода-флуда
+      },
+    });
+    const clearBtn = h('button.book-search-clear', {
+      type: 'button', 'aria-label': 'Очистить поиск', style: { display: 'none' },
+      onClick: () => {
+        input.value = ''; searchTerm = '';
+        clearBtn.style.display = 'none';
+        renderBook(true); input.focus();
+      },
+    }, icon('x'));
+    return h('div.book-search',
+      icon('search', { class: 'book-search-ico' }),
+      input,
+      searchCount,
+      clearBtn,
+    );
+  }
+
   /* ===================== wiring ===================== */
 
   // build first — subscriptions fire synchronously and must find live refs
@@ -644,6 +733,7 @@ export function P2PScreen({ slot }) {
     ),
     h('div', { style: { '--i': 5 } },
       h('div.panel.panel-flush.book',
+        searchBar(),
         h('div.book-head', bookCount, h('span', `Цена`), h('span', 'Доступно')),
         bookBody,
       ),

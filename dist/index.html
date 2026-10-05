@@ -841,6 +841,25 @@ main {
 }
 .pay-card.add svg { width: 20px; height: 20px; }
 .pay-card.add span { font-size: 11px; font-weight: 600; }
+/* единственная плитка, когда карт ещё нет */
+.pay-card.add.empty {
+  flex: none;
+  width: 100%;
+  height: 118px;
+  gap: 9px;
+  color: var(--ink-2);
+  background:
+    radial-gradient(130% 100% at 50% 0%, var(--acid-ghost), transparent 62%),
+    linear-gradient(145deg, var(--panel-2), var(--panel));
+}
+.pay-card.add.empty::before { display: none; }
+.pay-card.add.empty svg {
+  width: 26px; height: 26px;
+  color: var(--acid);
+  stroke-width: 2.1;
+}
+.pay-card.add.empty span { font-size: 13px; font-weight: 650; }
+.pay-card.add.empty:active { transform: scale(.99); }
 
 /* =========================================================
    P2P — exchange status strip
@@ -868,6 +887,52 @@ main {
    P2P — order book (стакан)
    ========================================================= */
 .book { position: relative; }
+
+/* --- поиск по стакану --- */
+.book-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+.book-search:focus-within { background: var(--panel-3); }
+.book-search-ico { width: 15px; height: 15px; color: var(--ink-4); flex: 0 0 auto; }
+.book-search input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  background: none;
+  border: none;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-family: var(--font-mono);
+}
+.book-search input::placeholder { color: var(--ink-4); font-family: var(--font-ui); }
+.book-search input::-webkit-search-decoration,
+.book-search input::-webkit-search-cancel-button { appearance: none; }
+.book-search-clear {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 6px;
+  color: var(--ink-3);
+  background: var(--panel-3);
+}
+.book-search-clear svg { width: 13px; height: 13px; }
+.book-search-clear:active { transform: scale(.92); }
+
+/* подсветка совпадений */
+mark.hl {
+  background: var(--acid);
+  color: var(--acid-ink);
+  border-radius: 3px;
+  padding: 0 1px;
+  margin: 0 -1px;
+  font-weight: 700;
+}
+
 .book-head {
   display: grid;
   grid-template-columns: 1fr 86px 68px;
@@ -1597,8 +1662,8 @@ __m["src/core/store.js"] = function (__x, __req) {
  * Ephemeral slices (offers, logs, wires) stay in memory only.
  */
 const { uid } = __req("src/core/format.js");
-// ключ не переименовываем вслед за продуктом — иначе у всех слетит сохранённое состояние
-const LS_KEY = 'p2pdesk.state.v1';
+// v2: сброс демо-данных (баланс/карты) — старое состояние v1 намеренно игнорируется
+const LS_KEY = 'p2pdesk.state.v2';
 const PERSIST = ['balance', 'cards', 'settings', 'kyc', 'purchases', 'ui', 'filters', 'profile', 'stats'];
 
 const PAY_METHODS = [
@@ -1629,13 +1694,10 @@ const PLANS = [
 
 function defaults() {
   return {
-    balance: { usdt: 4820.47, locked: 0 },
+    // без демо-данных: баланс и карты пустые, пользователь заводит сам
+    balance: { usdt: 0, locked: 0 },
 
-    cards: [
-      { id: uid('card'), bank: 'sber',  label: 'Сбербанк',   number: '4276551234567890', balance: 452800, limit: 600000, currency: 'RUB', active: true },
-      { id: uid('card'), bank: 'tbank', label: 'Т-Банк',     number: '5536913098761234', balance: 142300, limit: 400000, currency: 'RUB', active: true },
-      { id: uid('card'), bank: 'alfa',  label: 'Альфа-Банк', number: '4154812233445566', balance: 56900,  limit: 300000, currency: 'RUB', active: false },
-    ],
+    cards: [],
 
     purchases: [],
 
@@ -1719,9 +1781,9 @@ function defaults() {
       plan: 'pro',
       apiToken: 'p2pd_live_' + Math.random().toString(36).slice(2, 12),
       twoFa: false,
-      seatsUsed: 2,
-      apiUsed: 48320,
-      joinedAt: Date.now() - 86400000 * 94,
+      seatsUsed: 1,
+      apiUsed: 0,
+      joinedAt: Date.now(),
     },
 
     stats: { volumeUsdt: 0, deals: 0, won: 0, spreadSum: 0, profitUsdt: 0, dayVolume: 0, dayKey: new Date().toDateString() },
@@ -1958,6 +2020,7 @@ const ICONS = {
   bookmark: 'M6 3h12v18l-6-4.5L6 21V3Z',
   scale: 'M12 4v16M7 20h10M12 7 5 9l3.5 5L12 9l3.5 5L19 9l-7-2Z',
   activity: 'M3 12h4l3-7 4 14 3-7h4',
+  search: 'M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM21 21l-5.2-5.2',
 };
 
 function icon(name, props = {}) {
@@ -2299,6 +2362,74 @@ let wsRetry = 0;
 let reqId = 0;
 const venues = new Map();     // exchange -> MockVenue
 
+/* ============================================================
+   Защита фронта (режим live): флуд/DDoS и replay-атаки.
+   Сервер обязан проверять то же со своей стороны — клиентские
+   лимиты только оберегают UI-поток и не являются гарантией.
+   ============================================================ */
+const MAX_OFFERS   = 1500;    // потолок оферов в памяти (защита от раздувания)
+const MAX_BATCH    = 600;     // максимум upsert/remove за один кадр
+const MAX_FRAME    = 512 * 1024;  // максимальный размер кадра, байт
+const INBOUND_LIMIT = 300;    // кадров/с до отбрасывания (анти-флуд)
+const FRESH_FUTURE = 60_000;  // допуск рассинхрона часов вперёд, мс
+const FRESH_PAST   = 120_000; // кадр старше — считаем replay'ем, мс
+const DEDUPE_CAP   = 1024;    // размер окна недавних id
+
+const inbound = { winStart: 0, count: 0, dropped: 0, warned: 0 };
+const seenIds = [];           // ring недавних id кадров
+const seenSet = new Set();
+
+/** Пропускная способность входящего потока: true — кадр принимаем. */
+function rateOk() {
+  const now = Date.now();
+  if (now - inbound.winStart > 1000) {
+    if (inbound.dropped && now - inbound.warned > 3000) {
+      log('warn', 'sys', `перегрузка потока: отброшено <b>${inbound.dropped}</b> кадров/с`);
+      inbound.warned = now;
+    }
+    inbound.winStart = now; inbound.count = 0; inbound.dropped = 0;
+  }
+  if (inbound.count++ >= INBOUND_LIMIT) { inbound.dropped++; return false; }
+  return true;
+}
+
+/** Свежесть по метке времени: защита от воспроизведения старых кадров. */
+function fresh(ts) {
+  if (ts === undefined || ts === null) return true;
+  const n = Number(ts);
+  if (!Number.isFinite(n)) return false;
+  const now = Date.now();
+  return n <= now + FRESH_FUTURE && now - n <= FRESH_PAST;
+}
+
+/** Дедупликация по id/seq: точный повтор кадра — replay, отбрасываем. */
+function duplicate(key) {
+  if (key === undefined || key === null) return false;
+  const k = String(key);
+  if (seenSet.has(k)) return true;
+  seenSet.add(k); seenIds.push(k);
+  if (seenIds.length > DEDUPE_CAP) seenSet.delete(seenIds.shift());
+  return false;
+}
+
+function resetGuards() {
+  inbound.winStart = 0; inbound.count = 0; inbound.dropped = 0; inbound.warned = 0;
+  seenIds.length = 0; seenSet.clear();
+}
+
+let resubTimer = null;        // дебаунс пере-подписки (анти-флуд subscribe)
+
+/** Криптослучайный одноразовый токен для auth/идемпотентности. */
+function newNonce() {
+  try {
+    const a = new Uint8Array(16);
+    crypto.getRandomValues(a);
+    return [...a].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+  }
+}
+
 /* ============================ public API ============================ */
 
 function startFeed() {
@@ -2314,6 +2445,8 @@ function stopFeed() {
   running = false;
   clearInterval(tickTimer); tickTimer = null;
   clearInterval(statusTimer); statusTimer = null;
+  clearTimeout(resubTimer); resubTimer = null;
+  resetGuards();
   if (ws) { try { ws.close(1000, 'client stop'); } catch {} ws = null; }
   venues.clear();
   for (const id of Object.keys(state.wires)) state.wires[id] = { state: 'idle', latency: 0, msgs: 0, lastTs: 0 };
@@ -2327,12 +2460,22 @@ function restartFeed() {
   startFeed();
 }
 
-/** Re-subscribe after the user changes asset / fiat / side / exchanges. */
+/**
+ * Re-subscribe after the user changes asset / fiat / side / exchanges.
+ * Очистка стакана — сразу (отклик UI), а сам subscribe/seed дебаунсится,
+ * чтобы быстрые переключения фильтров не слали серверу шквал подписок.
+ */
 function resubscribe() {
-  const f = state.filters;
-  log('info', 'sys', `Подписка <b>${f.asset}/${f.fiat}</b> · ${f.side === 'buy' ? 'покупка' : 'продажа'} · ${f.exchanges.length} бирж`);
   state.offers = {};
   emit('offers', { reason: 'resubscribe' });
+  clearTimeout(resubTimer);
+  resubTimer = setTimeout(doSubscribe, 220);
+}
+
+function doSubscribe() {
+  if (!running) return;
+  const f = state.filters;
+  log('info', 'sys', `Подписка <b>${f.asset}/${f.fiat}</b> · ${f.side === 'buy' ? 'покупка' : 'продажа'} · ${f.exchanges.length} бирж`);
   if (mode === 'live') {
     sendWs({ op: 'subscribe', channel: 'p2p.book', args: subscribeArgs() });
   } else {
@@ -2372,15 +2515,31 @@ function connectWs() {
 
   ws.onopen = () => {
     wsRetry = 0;
+    resetGuards();
     log('info', 'sys', 'WS <b>открыт</b>, отправляю auth + subscribe');
-    sendWs({ op: 'auth', token: state.profile.apiToken, initData: window.Telegram?.WebApp?.initData || '' });
+    // nonce + ts позволяют серверу отбить replay самого auth-кадра
+    sendWs({
+      op: 'auth',
+      token: state.profile.apiToken,
+      initData: window.Telegram?.WebApp?.initData || '',
+      nonce: newNonce(),
+      ts: Date.now(),
+    });
     sendWs({ op: 'subscribe', channel: 'p2p.book', args: subscribeArgs() });
     sendWs({ op: 'subscribe', channel: 'p2p.logs', args: { exchanges: state.filters.exchanges } });
   };
 
   ws.onmessage = (e) => {
+    // 1) анти-флуд: бережём UI-поток от шквала кадров
+    if (!rateOk()) return;
+    // 2) отбрасываем бинарные и неадекватно большие кадры
+    if (typeof e.data !== 'string' || e.data.length > MAX_FRAME) return;
     let msg;
     try { msg = JSON.parse(e.data); } catch { return log('warn', 'sys', 'WS: не-JSON кадр'); }
+    if (!msg || typeof msg !== 'object') return;
+    // 3) replay: устаревший по времени или повторённый по id кадр — игнор
+    if (!fresh(msg.ts)) return;
+    if (duplicate(msg.id ?? msg.seq)) return;
     handleServerEvent(msg);
   };
 
@@ -2395,8 +2554,10 @@ function connectWs() {
 
 function scheduleReconnect() {
   wsRetry++;
-  const delay = Math.min(30000, 1000 * 2 ** Math.min(wsRetry, 5));
-  log('warn', 'sys', `Переподключение через <b>${(delay / 1000).toFixed(0)}с</b> (попытка ${wsRetry})`);
+  // экспонента + джиттер: не создаём «стадо» одновременных переподключений к серверу
+  const base = Math.min(30000, 1000 * 2 ** Math.min(wsRetry, 5));
+  const delay = base / 2 + Math.random() * (base / 2);
+  log('warn', 'sys', `Переподключение через <b>${(delay / 1000).toFixed(1)}с</b> (попытка ${wsRetry})`);
   setTimeout(() => { if (running && mode === 'live') connectWs(); }, delay);
 }
 
@@ -2411,68 +2572,115 @@ function handleServerEvent(msg) {
   switch (msg.ev) {
     case 'snapshot': {
       const ex = msg.exchange;
+      if (!EX[ex]) break;                     // неизвестная биржа — игнор
       for (const id of Object.keys(state.offers)) if (state.offers[id].exchange === ex) delete state.offers[id];
-      for (const o of msg.data?.offers || []) state.offers[o.id] = normalizeOffer(o);
+      const raw = Array.isArray(msg.data?.offers) ? msg.data.offers : [];
+      let budget = MAX_OFFERS - Object.keys(state.offers).length;
+      let added = 0;
+      for (const r of raw) {
+        if (budget <= 0) break;               // потолок памяти
+        const o = normalizeOffer(r);
+        if (!o || o.exchange !== ex) continue; // мусор / чужая биржа — отбрасываем
+        state.offers[o.id] = o; budget--; added++;
+      }
       setWire(ex, { state: 'live', lastTs: msg.ts || Date.now() });
-      bumpMsgs(ex, msg.data?.offers?.length || 0);
-      log('info', ex, `snapshot · <b>${msg.data?.offers?.length || 0}</b> оферов`);
+      bumpMsgs(ex, added);
+      log('info', ex, `snapshot · <b>${added}</b> оферов`);
       recomputeMarket();
       emit('offers', { reason: 'snapshot', exchange: ex });
       break;
     }
     case 'update': {
       const ex = msg.exchange;
-      for (const o of msg.data?.upsert || []) applyUpsert(normalizeOffer(o));
-      for (const id of msg.data?.remove || []) applyRemove(id);
-      bumpMsgs(ex, (msg.data?.upsert?.length || 0) + (msg.data?.remove?.length || 0));
+      if (!EX[ex]) break;                     // неизвестная биржа — игнор
+      const ups = Array.isArray(msg.data?.upsert) ? msg.data.upsert.slice(0, MAX_BATCH) : [];
+      const rem = Array.isArray(msg.data?.remove) ? msg.data.remove.slice(0, MAX_BATCH) : [];
+      let budget = MAX_OFFERS - Object.keys(state.offers).length;
+      let touched = 0;
+      for (const r of ups) {
+        const o = normalizeOffer(r);
+        if (!o || o.exchange !== ex) continue;
+        if (!state.offers[o.id]) { if (budget <= 0) continue; budget--; }  // новый — только в пределах потолка
+        applyUpsert(o); touched++;
+      }
+      for (const id of rem) { if (typeof id === 'string') { applyRemove(id); touched++; } }
+      bumpMsgs(ex, touched);
       setWire(ex, { state: 'live', lastTs: msg.ts || Date.now() });
       recomputeMarket();
       emit('offers', { reason: 'update', exchange: ex });
       break;
     }
-    case 'status':
-      setWire(msg.exchange, { state: msg.data?.state || 'live', latency: msg.data?.latency ?? 0 });
+    case 'status': {
+      if (!EX[msg.exchange]) break;
+      const st = ['idle', 'connecting', 'live', 'down'].includes(msg.data?.state) ? msg.data.state : 'live';
+      const lat = Math.min(60_000, Math.max(0, Number(msg.data?.latency) || 0));
+      setWire(msg.exchange, { state: st, latency: lat });
       break;
-    case 'log':
-      log(msg.data?.level || 'info', msg.data?.exchange || 'sys', msg.data?.text || '');
+    }
+    case 'log': {
+      const lvl = ['info', 'up', 'down', 'new', 'gone', 'warn', 'alert', 'trade'].includes(msg.data?.level) ? msg.data.level : 'info';
+      const lex = EX[msg.data?.exchange] ? msg.data.exchange : 'sys';
+      log(lvl, lex, String(msg.data?.text ?? '').slice(0, 300));  // текст экранируется в рендере лога
       break;
+    }
     case 'pong':
       break;
-    case 'error':
-      log('warn', msg.data?.exchange || 'sys', `ошибка: <b>${msg.data?.message || msg.data?.code}</b>`);
+    case 'error': {
+      const lex = EX[msg.data?.exchange] ? msg.data.exchange : 'sys';
+      log('warn', lex, `ошибка: <b>${String(msg.data?.message ?? msg.data?.code ?? '').slice(0, 200)}</b>`);
       break;
+    }
     default:
       log('info', 'sys', `неизвестное событие: ${msg.ev}`);
   }
 }
 
+/**
+ * Нормализация и САНИТИЗАЦИЯ входящего офера.
+ * Возвращает null для мусора (нет id/биржи, нечисловая/абсурдная цена) —
+ * чтобы NaN и огромные значения не ломали сортировку, depth-бары и расчёты.
+ * Строки обрезаются, числа приводятся и зажимаются в разумные пределы.
+ */
 function normalizeOffer(o) {
+  if (!o || typeof o !== 'object') return null;
+  const id = typeof o.id === 'string' ? o.id.slice(0, 96) : null;
+  const exchange = typeof o.exchange === 'string' ? o.exchange.slice(0, 24) : null;
+  if (!id || !exchange) return null;
+
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : NaN; };
+  const price = num(o.price);
+  if (!(price > 0) || price > 1e12) return null;        // явный мусор или нечисло
+
+  const nn = (v, d = 0) => { const n = num(v); return Number.isFinite(n) ? Math.max(0, n) : d; };
+  const str = (v, d, max) => (typeof v === 'string' ? v : d).slice(0, max);
+  const m = o.merchant || {};
+
   return {
-    id: o.id,
-    exchange: o.exchange,
-    side: o.side,
-    asset: o.asset,
-    fiat: o.fiat,
-    price: Number(o.price),
-    prevPrice: state.offers[o.id]?.price ?? Number(o.price),
-    available: Number(o.available),
-    min: Number(o.min),
-    max: Number(o.max),
-    methods: o.methods || [],
+    id,
+    exchange,
+    side: o.side === 'sell' ? 'sell' : 'buy',
+    asset: str(o.asset, 'USDT', 12),
+    fiat: str(o.fiat, 'RUB', 8),
+    price,
+    prevPrice: state.offers[id]?.price ?? price,
+    available: Math.min(nn(o.available), 1e15),
+    min: Math.min(nn(o.min), 1e15),
+    max: Math.min(nn(o.max), 1e15),
+    methods: Array.isArray(o.methods) ? o.methods.filter((x) => typeof x === 'string').slice(0, 12) : [],
     merchant: {
-      id: o.merchant?.id || o.id,
-      name: o.merchant?.name || 'unknown',
-      orders: o.merchant?.orders ?? 0,
-      completion: o.merchant?.completion ?? 0,
-      rating: o.merchant?.rating ?? 0,
-      verified: Boolean(o.merchant?.verified),
-      pro: Boolean(o.merchant?.pro),
-      avgReleaseMin: o.merchant?.avgReleaseMin ?? 10,
-      online: o.merchant?.online !== false,
-      blocked: Boolean(o.merchant?.blocked),
+      id: str(m.id, id, 96),
+      name: str(m.name, 'unknown', 64),
+      orders: Math.min(Math.round(nn(m.orders)), 1e9),
+      completion: Math.min(1, Math.max(0, num(m.completion) || 0)),
+      rating: Math.min(5, Math.max(0, num(m.rating) || 0)),
+      verified: Boolean(m.verified),
+      pro: Boolean(m.pro),
+      avgReleaseMin: Math.min(1440, nn(m.avgReleaseMin, 10)),
+      online: m.online !== false,
+      blocked: Boolean(m.blocked),
     },
-    kycRequired: o.kycRequired ?? 0,
-    ts: o.ts || Date.now(),
+    kycRequired: Math.min(3, Math.max(0, Math.round(num(o.kycRequired) || 0))),
+    ts: Number.isFinite(num(o.ts)) ? num(o.ts) : Date.now(),
   };
 }
 
@@ -2732,6 +2940,7 @@ const allExchangeIds = EXCHANGES.map((e) => e.id);
   __x.bestOffer = bestOffer;
   __x.feedMode = feedMode;
   __x.allExchangeIds = allExchangeIds;
+  __x.newNonce = newNonce;
 };
 
 __m["src/ui/sheet.js"] = function (__x, __req) {
@@ -3191,8 +3400,21 @@ function preflight(offer, volumeUsdt, cardId) {
   return { ok: errs.length === 0, errors: errs, ctx };
 }
 
+// Защита от двойной отправки: быстрый повторный тап по «Закупить» не должен
+// создавать два ордера. Лок на короткое окно + по конкретному оферу.
+let execLock = 0;
+let lastOfferKey = '';
+
 /** Execute. Returns the purchase record or null. */
 function execute(offer, volumeUsdt, cardId, method) {
+  const now = Date.now();
+  const key = `${offer.id}:${volumeUsdt}:${cardId}`;
+  if (now - execLock < 900 && key === lastOfferKey) {
+    log('warn', offer.exchange, 'повторная отправка подавлена (анти-дабл-тап)');
+    return null;
+  }
+  execLock = now; lastOfferKey = key;
+
   const pf = preflight(offer, volumeUsdt, cardId);
   if (!pf.ok) {
     toast('Сделка не отправлена', pf.errors[0].text, 'err');
@@ -3208,6 +3430,8 @@ function execute(offer, volumeUsdt, cardId, method) {
   const deal = {
     id: uid('deal'),
     ref: 'P2D-' + Math.random().toString(36).slice(2, 8).toUpperCase(),
+    // ключ идемпотентности: бэкенд по нему отбивает повторную отправку одного ордера
+    idemKey: uid('idem') + Math.random().toString(36).slice(2, 10),
     side: offer.side,
     exchange: offer.exchange,
     asset: offer.asset,
@@ -3626,13 +3850,21 @@ function tile(label, value, sub, tone = 'acid', spark = null) {
 
 function cardsBlock() {
   const hidden = state.ui.balanceHidden;
-  const total = state.cards.filter((c) => c.active).reduce((a, c) => a + c.balance, 0);
 
+  // карт нет — одна крупная плитка «+ Добавить карту»
+  if (!state.cards.length) {
+    return h('button.pay-card.add.empty', { onClick: () => openCardSheet() },
+      icon('plus'),
+      h('span', 'Добавить карту'),
+    );
+  }
+
+  const total = state.cards.filter((c) => c.active).reduce((a, c) => a + c.balance, 0);
   return h('div',
     h('div', { class: hidden ? 'balance-hidden' : '' },
       h('div.cards-rail',
         state.cards.map((c) => payCard(c)),
-        h('button.pay-card.add', { onClick: () => openCardSheet() }, icon('plus'), h('span', 'Добавить')),
+        h('button.pay-card.add', { onClick: () => openCardSheet() }, icon('plus'), h('span', 'Добавить карту')),
       ),
     ),
     h('div.wire', { style: { marginTop: '4px' } },
@@ -4320,6 +4552,38 @@ function P2PScreen({ slot }) {
   const logBarSlot = h('div.console-bar');
   const sortLabel = h('span', SORTS.find((s) => s.id === state.filters.sort)?.label || 'Цена');
 
+  /* ---- поиск по стакану (подсветка совпадений) ---- */
+  let searchTerm = '';                 // всегда в нижнем регистре
+  const searchCount = h('span.t-xs.mono.t-muted');
+
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  /** Экранированный HTML с обёрнутыми <mark> совпадениями. term уже в нижнем регистре. */
+  function hlHTML(text, term) {
+    const t = String(text);
+    const low = t.toLowerCase();
+    let i = 0, out = '', idx;
+    while ((idx = low.indexOf(term, i)) !== -1) {
+      out += esc(t.slice(i, idx)) + '<mark class="hl">' + esc(t.slice(idx, idx + term.length)) + '</mark>';
+      i = idx + term.length;
+      if (term.length === 0) break;    // страховка
+    }
+    return out + esc(t.slice(i));
+  }
+
+  /**
+   * Пишет текст в узел: быстрый textContent, либо innerHTML с подсветкой.
+   * Безопасно по XSS — текст всегда экранируется, в разметку уходят только <mark>.
+   */
+  function setHL(el, text) {
+    text = String(text);
+    if (el._text === text && el._hlTerm === searchTerm) return;
+    el._text = text; el._hlTerm = searchTerm;
+    if (searchTerm && text.toLowerCase().includes(searchTerm)) el.innerHTML = hlHTML(text, searchTerm);
+    else el.textContent = text;
+  }
+
   /* ---- topbar mode toggle ---- */
   const modeBtn = h('button.btn.btn-xs.btn-ghost', {
     onClick: () => {
@@ -4636,7 +4900,7 @@ function P2PScreen({ slot }) {
     const dev = med ? ((o.price - med) / med) * 100 : 0;
     const favourable = state.filters.side === 'buy' ? -dev : dev;
 
-    if (refs.name.textContent !== m.name) refs.name.textContent = m.name;
+    setHL(refs.name, m.name);
 
     const wantVerified = m.verified ? 'v' : '';
     if (refs.verified.dataset.s !== wantVerified) {
@@ -4650,9 +4914,9 @@ function P2PScreen({ slot }) {
     }
 
     refs.onlineDot.style.background = m.online ? 'var(--buy)' : 'var(--ink-4)';
-    refs.orders.textContent = String(m.orders);
-    refs.completion.textContent = `${(m.completion * 100).toFixed(1)}%`;
-    refs.release.textContent = `${m.avgReleaseMin}м`;
+    setHL(refs.orders, String(m.orders));
+    setHL(refs.completion, `${(m.completion * 100).toFixed(1)}%`);
+    setHL(refs.release, `${m.avgReleaseMin}м`);
 
     const needKyc = (o.kycRequired || 0) > state.kyc.level;
     const wantKyc = needKyc ? `k${o.kycRequired}` : '';
@@ -4667,11 +4931,11 @@ function P2PScreen({ slot }) {
       mount(refs.methods, methodsKey ? o.methods.slice(0, 3).map((mid) => h('span.pm', PM[mid]?.name || mid)) : null);
     }
 
-    refs.price.textContent = fmtN(o.price, 2);
-    refs.dev.textContent = `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`;
+    setHL(refs.price, fmtN(o.price, 2));
+    setHL(refs.dev, `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`);
     refs.dev.style.color = favourable > 0 ? 'var(--buy)' : favourable < 0 ? 'var(--sell)' : 'var(--ink-4)';
-    refs.avail.textContent = compact(o.available);
-    refs.limits.textContent = `${compact(o.min)}–${compact(o.max)}`;
+    setHL(refs.avail, compact(o.available));
+    setHL(refs.limits, `${compact(o.min)}–${compact(o.max)}`);
 
     entry.el.style.setProperty('--depth', `${Math.min(100, (o.available / (maxAvail || 1)) * 100)}%`);
     entry.el.style.setProperty('--depth-c', state.filters.side === 'buy' ? 'var(--buy-ghost)' : 'var(--sell-ghost)');
@@ -4688,9 +4952,29 @@ function P2PScreen({ slot }) {
   }
 
   /** @param {boolean} force re-sort immediately (filters/volume/market changed) */
+  /** Текст строки, по которому ищем (совпадает с подсвечиваемыми полями). */
+  function offerHay(o) {
+    const med = state.market.median;
+    const dev = med ? ((o.price - med) / med) * 100 : 0;
+    return [
+      o.merchant.name, String(o.merchant.orders), `${(o.merchant.completion * 100).toFixed(1)}%`,
+      `${o.merchant.avgReleaseMin}м`, fmtN(o.price, 2), `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`,
+      compact(o.available), `${compact(o.min)}–${compact(o.max)}`,
+    ].join(' ').toLowerCase();
+  }
+
   function renderBook(force = false) {
     const list = visibleOffers().slice(0, MAX_ROWS);
     bookCount.textContent = `Мерчант · ${list.length} оферов`;
+
+    if (searchTerm) {
+      const n = list.reduce((a, o) => a + (offerHay(o).includes(searchTerm) ? 1 : 0), 0);
+      searchCount.textContent = n ? `${n} совпад.` : 'нет совпадений';
+      searchCount.classList.toggle('t-sell', !n);
+    } else {
+      searchCount.textContent = '';
+      searchCount.classList.remove('t-sell');
+    }
 
     if (!list.length) {
       rows.clear();
@@ -4810,10 +5094,15 @@ function P2PScreen({ slot }) {
     });
   }
 
+  // Сообщение лога может содержать подставленные сервером/мерчантом строки.
+  // Экранируем всё, затем возвращаем только <b>/</b> — так имя мерчанта вида
+  // "<img onerror=…>" станет безопасным текстом, а форматирование сохранится.
+  const safeLogHTML = (s) => esc(s).replace(/&lt;(\/?)b&gt;/g, '<$1b>');
+
   const logLine = (e) => h('div.log-line', { class: `lv-${e.level}` },
     h('span.log-ts', hhmmss(e.ts)),
     h('span.log-ex', { style: { color: EX[e.exchange]?.tint || 'var(--ink-3)' } }, EX[e.exchange]?.tag || e.exchange),
-    h('span.log-msg', { html: e.message }),
+    h('span.log-msg', { html: safeLogHTML(e.message) }),
   );
 
   function renderLogs() {
@@ -4852,6 +5141,38 @@ function P2PScreen({ slot }) {
     });
   }
 
+  /* ===================== search bar ===================== */
+
+  function searchBar() {
+    const input = h('input', {
+      type: 'search', inputmode: 'search', enterkeyhint: 'search',
+      'aria-label': 'Поиск по стакану', placeholder: 'Поиск по стакану: мерчант, цена, «3»…',
+      maxlength: 32, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+      onInput: (e) => {
+        clearTimeout(input._t);
+        input._t = setTimeout(() => {
+          searchTerm = String(e.target.value).trim().toLowerCase().slice(0, 32);
+          clearBtn.style.display = searchTerm ? '' : 'none';
+          renderBook(true);
+        }, 140);                    // дебаунс: защита UI от ввода-флуда
+      },
+    });
+    const clearBtn = h('button.book-search-clear', {
+      type: 'button', 'aria-label': 'Очистить поиск', style: { display: 'none' },
+      onClick: () => {
+        input.value = ''; searchTerm = '';
+        clearBtn.style.display = 'none';
+        renderBook(true); input.focus();
+      },
+    }, icon('x'));
+    return h('div.book-search',
+      icon('search', { class: 'book-search-ico' }),
+      input,
+      searchCount,
+      clearBtn,
+    );
+  }
+
   /* ===================== wiring ===================== */
 
   // build first — subscriptions fire synchronously and must find live refs
@@ -4882,6 +5203,7 @@ function P2PScreen({ slot }) {
     ),
     h('div', { style: { '--i': 5 } },
       h('div.panel.panel-flush.book',
+        searchBar(),
         h('div.book-head', bookCount, h('span', `Цена`), h('span', 'Доступно')),
         bookBody,
       ),

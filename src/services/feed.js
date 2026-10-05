@@ -22,6 +22,75 @@ let wsRetry = 0;
 let reqId = 0;
 const venues = new Map();     // exchange -> MockVenue
 
+/* ============================================================
+   Защита фронта (режим live): флуд/DDoS и replay-атаки.
+   Сервер обязан проверять то же со своей стороны — клиентские
+   лимиты только оберегают UI-поток и не являются гарантией.
+   ============================================================ */
+const MAX_OFFERS   = 1500;    // потолок оферов в памяти (защита от раздувания)
+const MAX_BATCH    = 600;     // максимум upsert/remove за один кадр
+const MAX_FRAME    = 512 * 1024;  // максимальный размер кадра, байт
+const INBOUND_LIMIT = 300;    // кадров/с до отбрасывания (анти-флуд)
+const FRESH_FUTURE = 60_000;  // допуск рассинхрона часов вперёд, мс
+const FRESH_PAST   = 120_000; // кадр старше — считаем replay'ем, мс
+const DEDUPE_CAP   = 1024;    // размер окна недавних id
+
+const inbound = { winStart: 0, count: 0, dropped: 0, warned: 0 };
+const seenIds = [];           // ring недавних id кадров
+const seenSet = new Set();
+
+/** Пропускная способность входящего потока: true — кадр принимаем. */
+function rateOk() {
+  const now = Date.now();
+  if (now - inbound.winStart > 1000) {
+    if (inbound.dropped && now - inbound.warned > 3000) {
+      log('warn', 'sys', `перегрузка потока: отброшено <b>${inbound.dropped}</b> кадров/с`);
+      inbound.warned = now;
+    }
+    inbound.winStart = now; inbound.count = 0; inbound.dropped = 0;
+  }
+  if (inbound.count++ >= INBOUND_LIMIT) { inbound.dropped++; return false; }
+  return true;
+}
+
+/** Свежесть по метке времени: защита от воспроизведения старых кадров. */
+function fresh(ts) {
+  if (ts === undefined || ts === null) return true;
+  const n = Number(ts);
+  if (!Number.isFinite(n)) return false;
+  const now = Date.now();
+  return n <= now + FRESH_FUTURE && now - n <= FRESH_PAST;
+}
+
+/** Дедупликация по id/seq: точный повтор кадра — replay, отбрасываем. */
+function duplicate(key) {
+  if (key === undefined || key === null) return false;
+  const k = String(key);
+  if (seenSet.has(k)) return true;
+  seenSet.add(k); seenIds.push(k);
+  if (seenIds.length > DEDUPE_CAP) seenSet.delete(seenIds.shift());
+  return false;
+}
+
+function resetGuards() {
+  inbound.winStart = 0; inbound.count = 0; inbound.dropped = 0; inbound.warned = 0;
+  seenIds.length = 0; seenSet.clear();
+}
+
+let resubTimer = null;        // дебаунс пере-подписки (анти-флуд subscribe)
+
+/** Криптослучайный одноразовый токен для auth/идемпотентности. */
+function newNonce() {
+  try {
+    const a = new Uint8Array(16);
+    crypto.getRandomValues(a);
+    return [...a].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+  }
+}
+export { newNonce };
+
 /* ============================ public API ============================ */
 
 export function startFeed() {
@@ -37,6 +106,8 @@ export function stopFeed() {
   running = false;
   clearInterval(tickTimer); tickTimer = null;
   clearInterval(statusTimer); statusTimer = null;
+  clearTimeout(resubTimer); resubTimer = null;
+  resetGuards();
   if (ws) { try { ws.close(1000, 'client stop'); } catch {} ws = null; }
   venues.clear();
   for (const id of Object.keys(state.wires)) state.wires[id] = { state: 'idle', latency: 0, msgs: 0, lastTs: 0 };
@@ -50,12 +121,22 @@ export function restartFeed() {
   startFeed();
 }
 
-/** Re-subscribe after the user changes asset / fiat / side / exchanges. */
+/**
+ * Re-subscribe after the user changes asset / fiat / side / exchanges.
+ * Очистка стакана — сразу (отклик UI), а сам subscribe/seed дебаунсится,
+ * чтобы быстрые переключения фильтров не слали серверу шквал подписок.
+ */
 export function resubscribe() {
-  const f = state.filters;
-  log('info', 'sys', `Подписка <b>${f.asset}/${f.fiat}</b> · ${f.side === 'buy' ? 'покупка' : 'продажа'} · ${f.exchanges.length} бирж`);
   state.offers = {};
   emit('offers', { reason: 'resubscribe' });
+  clearTimeout(resubTimer);
+  resubTimer = setTimeout(doSubscribe, 220);
+}
+
+function doSubscribe() {
+  if (!running) return;
+  const f = state.filters;
+  log('info', 'sys', `Подписка <b>${f.asset}/${f.fiat}</b> · ${f.side === 'buy' ? 'покупка' : 'продажа'} · ${f.exchanges.length} бирж`);
   if (mode === 'live') {
     sendWs({ op: 'subscribe', channel: 'p2p.book', args: subscribeArgs() });
   } else {
@@ -95,15 +176,31 @@ function connectWs() {
 
   ws.onopen = () => {
     wsRetry = 0;
+    resetGuards();
     log('info', 'sys', 'WS <b>открыт</b>, отправляю auth + subscribe');
-    sendWs({ op: 'auth', token: state.profile.apiToken, initData: window.Telegram?.WebApp?.initData || '' });
+    // nonce + ts позволяют серверу отбить replay самого auth-кадра
+    sendWs({
+      op: 'auth',
+      token: state.profile.apiToken,
+      initData: window.Telegram?.WebApp?.initData || '',
+      nonce: newNonce(),
+      ts: Date.now(),
+    });
     sendWs({ op: 'subscribe', channel: 'p2p.book', args: subscribeArgs() });
     sendWs({ op: 'subscribe', channel: 'p2p.logs', args: { exchanges: state.filters.exchanges } });
   };
 
   ws.onmessage = (e) => {
+    // 1) анти-флуд: бережём UI-поток от шквала кадров
+    if (!rateOk()) return;
+    // 2) отбрасываем бинарные и неадекватно большие кадры
+    if (typeof e.data !== 'string' || e.data.length > MAX_FRAME) return;
     let msg;
     try { msg = JSON.parse(e.data); } catch { return log('warn', 'sys', 'WS: не-JSON кадр'); }
+    if (!msg || typeof msg !== 'object') return;
+    // 3) replay: устаревший по времени или повторённый по id кадр — игнор
+    if (!fresh(msg.ts)) return;
+    if (duplicate(msg.id ?? msg.seq)) return;
     handleServerEvent(msg);
   };
 
@@ -118,8 +215,10 @@ function connectWs() {
 
 function scheduleReconnect() {
   wsRetry++;
-  const delay = Math.min(30000, 1000 * 2 ** Math.min(wsRetry, 5));
-  log('warn', 'sys', `Переподключение через <b>${(delay / 1000).toFixed(0)}с</b> (попытка ${wsRetry})`);
+  // экспонента + джиттер: не создаём «стадо» одновременных переподключений к серверу
+  const base = Math.min(30000, 1000 * 2 ** Math.min(wsRetry, 5));
+  const delay = base / 2 + Math.random() * (base / 2);
+  log('warn', 'sys', `Переподключение через <b>${(delay / 1000).toFixed(1)}с</b> (попытка ${wsRetry})`);
   setTimeout(() => { if (running && mode === 'live') connectWs(); }, delay);
 }
 
@@ -134,68 +233,115 @@ function handleServerEvent(msg) {
   switch (msg.ev) {
     case 'snapshot': {
       const ex = msg.exchange;
+      if (!EX[ex]) break;                     // неизвестная биржа — игнор
       for (const id of Object.keys(state.offers)) if (state.offers[id].exchange === ex) delete state.offers[id];
-      for (const o of msg.data?.offers || []) state.offers[o.id] = normalizeOffer(o);
+      const raw = Array.isArray(msg.data?.offers) ? msg.data.offers : [];
+      let budget = MAX_OFFERS - Object.keys(state.offers).length;
+      let added = 0;
+      for (const r of raw) {
+        if (budget <= 0) break;               // потолок памяти
+        const o = normalizeOffer(r);
+        if (!o || o.exchange !== ex) continue; // мусор / чужая биржа — отбрасываем
+        state.offers[o.id] = o; budget--; added++;
+      }
       setWire(ex, { state: 'live', lastTs: msg.ts || Date.now() });
-      bumpMsgs(ex, msg.data?.offers?.length || 0);
-      log('info', ex, `snapshot · <b>${msg.data?.offers?.length || 0}</b> оферов`);
+      bumpMsgs(ex, added);
+      log('info', ex, `snapshot · <b>${added}</b> оферов`);
       recomputeMarket();
       emit('offers', { reason: 'snapshot', exchange: ex });
       break;
     }
     case 'update': {
       const ex = msg.exchange;
-      for (const o of msg.data?.upsert || []) applyUpsert(normalizeOffer(o));
-      for (const id of msg.data?.remove || []) applyRemove(id);
-      bumpMsgs(ex, (msg.data?.upsert?.length || 0) + (msg.data?.remove?.length || 0));
+      if (!EX[ex]) break;                     // неизвестная биржа — игнор
+      const ups = Array.isArray(msg.data?.upsert) ? msg.data.upsert.slice(0, MAX_BATCH) : [];
+      const rem = Array.isArray(msg.data?.remove) ? msg.data.remove.slice(0, MAX_BATCH) : [];
+      let budget = MAX_OFFERS - Object.keys(state.offers).length;
+      let touched = 0;
+      for (const r of ups) {
+        const o = normalizeOffer(r);
+        if (!o || o.exchange !== ex) continue;
+        if (!state.offers[o.id]) { if (budget <= 0) continue; budget--; }  // новый — только в пределах потолка
+        applyUpsert(o); touched++;
+      }
+      for (const id of rem) { if (typeof id === 'string') { applyRemove(id); touched++; } }
+      bumpMsgs(ex, touched);
       setWire(ex, { state: 'live', lastTs: msg.ts || Date.now() });
       recomputeMarket();
       emit('offers', { reason: 'update', exchange: ex });
       break;
     }
-    case 'status':
-      setWire(msg.exchange, { state: msg.data?.state || 'live', latency: msg.data?.latency ?? 0 });
+    case 'status': {
+      if (!EX[msg.exchange]) break;
+      const st = ['idle', 'connecting', 'live', 'down'].includes(msg.data?.state) ? msg.data.state : 'live';
+      const lat = Math.min(60_000, Math.max(0, Number(msg.data?.latency) || 0));
+      setWire(msg.exchange, { state: st, latency: lat });
       break;
-    case 'log':
-      log(msg.data?.level || 'info', msg.data?.exchange || 'sys', msg.data?.text || '');
+    }
+    case 'log': {
+      const lvl = ['info', 'up', 'down', 'new', 'gone', 'warn', 'alert', 'trade'].includes(msg.data?.level) ? msg.data.level : 'info';
+      const lex = EX[msg.data?.exchange] ? msg.data.exchange : 'sys';
+      log(lvl, lex, String(msg.data?.text ?? '').slice(0, 300));  // текст экранируется в рендере лога
       break;
+    }
     case 'pong':
       break;
-    case 'error':
-      log('warn', msg.data?.exchange || 'sys', `ошибка: <b>${msg.data?.message || msg.data?.code}</b>`);
+    case 'error': {
+      const lex = EX[msg.data?.exchange] ? msg.data.exchange : 'sys';
+      log('warn', lex, `ошибка: <b>${String(msg.data?.message ?? msg.data?.code ?? '').slice(0, 200)}</b>`);
       break;
+    }
     default:
       log('info', 'sys', `неизвестное событие: ${msg.ev}`);
   }
 }
 
+/**
+ * Нормализация и САНИТИЗАЦИЯ входящего офера.
+ * Возвращает null для мусора (нет id/биржи, нечисловая/абсурдная цена) —
+ * чтобы NaN и огромные значения не ломали сортировку, depth-бары и расчёты.
+ * Строки обрезаются, числа приводятся и зажимаются в разумные пределы.
+ */
 function normalizeOffer(o) {
+  if (!o || typeof o !== 'object') return null;
+  const id = typeof o.id === 'string' ? o.id.slice(0, 96) : null;
+  const exchange = typeof o.exchange === 'string' ? o.exchange.slice(0, 24) : null;
+  if (!id || !exchange) return null;
+
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : NaN; };
+  const price = num(o.price);
+  if (!(price > 0) || price > 1e12) return null;        // явный мусор или нечисло
+
+  const nn = (v, d = 0) => { const n = num(v); return Number.isFinite(n) ? Math.max(0, n) : d; };
+  const str = (v, d, max) => (typeof v === 'string' ? v : d).slice(0, max);
+  const m = o.merchant || {};
+
   return {
-    id: o.id,
-    exchange: o.exchange,
-    side: o.side,
-    asset: o.asset,
-    fiat: o.fiat,
-    price: Number(o.price),
-    prevPrice: state.offers[o.id]?.price ?? Number(o.price),
-    available: Number(o.available),
-    min: Number(o.min),
-    max: Number(o.max),
-    methods: o.methods || [],
+    id,
+    exchange,
+    side: o.side === 'sell' ? 'sell' : 'buy',
+    asset: str(o.asset, 'USDT', 12),
+    fiat: str(o.fiat, 'RUB', 8),
+    price,
+    prevPrice: state.offers[id]?.price ?? price,
+    available: Math.min(nn(o.available), 1e15),
+    min: Math.min(nn(o.min), 1e15),
+    max: Math.min(nn(o.max), 1e15),
+    methods: Array.isArray(o.methods) ? o.methods.filter((x) => typeof x === 'string').slice(0, 12) : [],
     merchant: {
-      id: o.merchant?.id || o.id,
-      name: o.merchant?.name || 'unknown',
-      orders: o.merchant?.orders ?? 0,
-      completion: o.merchant?.completion ?? 0,
-      rating: o.merchant?.rating ?? 0,
-      verified: Boolean(o.merchant?.verified),
-      pro: Boolean(o.merchant?.pro),
-      avgReleaseMin: o.merchant?.avgReleaseMin ?? 10,
-      online: o.merchant?.online !== false,
-      blocked: Boolean(o.merchant?.blocked),
+      id: str(m.id, id, 96),
+      name: str(m.name, 'unknown', 64),
+      orders: Math.min(Math.round(nn(m.orders)), 1e9),
+      completion: Math.min(1, Math.max(0, num(m.completion) || 0)),
+      rating: Math.min(5, Math.max(0, num(m.rating) || 0)),
+      verified: Boolean(m.verified),
+      pro: Boolean(m.pro),
+      avgReleaseMin: Math.min(1440, nn(m.avgReleaseMin, 10)),
+      online: m.online !== false,
+      blocked: Boolean(m.blocked),
     },
-    kycRequired: o.kycRequired ?? 0,
-    ts: o.ts || Date.now(),
+    kycRequired: Math.min(3, Math.max(0, Math.round(num(o.kycRequired) || 0))),
+    ts: Number.isFinite(num(o.ts)) ? num(o.ts) : Date.now(),
   };
 }
 

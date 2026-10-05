@@ -4,8 +4,8 @@
  */
 import { uid } from './format.js';
 
-// ключ не переименовываем вслед за продуктом — иначе у всех слетит сохранённое состояние
-const LS_KEY = 'p2pdesk.state.v1';
+// v2: сброс демо-данных (баланс/карты) — старое состояние v1 намеренно игнорируется
+const LS_KEY = 'p2pdesk.state.v2';
 const PERSIST = ['balance', 'cards', 'settings', 'kyc', 'purchases', 'ui', 'filters', 'profile', 'stats'];
 
 export const PAY_METHODS = [
@@ -36,13 +36,10 @@ export const PLANS = [
 
 function defaults() {
   return {
-    balance: { usdt: 4820.47, locked: 0 },
+    // без демо-данных: баланс и карты пустые, пользователь заводит сам
+    balance: { usdt: 0, locked: 0 },
 
-    cards: [
-      { id: uid('card'), bank: 'sber',  label: 'Сбербанк',   number: '4276551234567890', balance: 452800, limit: 600000, currency: 'RUB', active: true },
-      { id: uid('card'), bank: 'tbank', label: 'Т-Банк',     number: '5536913098761234', balance: 142300, limit: 400000, currency: 'RUB', active: true },
-      { id: uid('card'), bank: 'alfa',  label: 'Альфа-Банк', number: '4154812233445566', balance: 56900,  limit: 300000, currency: 'RUB', active: false },
-    ],
+    cards: [],
 
     purchases: [],
 
@@ -126,9 +123,9 @@ function defaults() {
       plan: 'pro',
       apiToken: 'p2pd_live_' + Math.random().toString(36).slice(2, 12),
       twoFa: false,
-      seatsUsed: 2,
-      apiUsed: 48320,
-      joinedAt: Date.now() - 86400000 * 94,
+      seatsUsed: 1,
+      apiUsed: 0,
+      joinedAt: Date.now(),
     },
 
     stats: { volumeUsdt: 0, deals: 0, won: 0, spreadSum: 0, profitUsdt: 0, dayVolume: 0, dayKey: new Date().toDateString() },

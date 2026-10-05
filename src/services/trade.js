@@ -56,8 +56,21 @@ export function preflight(offer, volumeUsdt, cardId) {
   return { ok: errs.length === 0, errors: errs, ctx };
 }
 
+// Защита от двойной отправки: быстрый повторный тап по «Закупить» не должен
+// создавать два ордера. Лок на короткое окно + по конкретному оферу.
+let execLock = 0;
+let lastOfferKey = '';
+
 /** Execute. Returns the purchase record or null. */
 export function execute(offer, volumeUsdt, cardId, method) {
+  const now = Date.now();
+  const key = `${offer.id}:${volumeUsdt}:${cardId}`;
+  if (now - execLock < 900 && key === lastOfferKey) {
+    log('warn', offer.exchange, 'повторная отправка подавлена (анти-дабл-тап)');
+    return null;
+  }
+  execLock = now; lastOfferKey = key;
+
   const pf = preflight(offer, volumeUsdt, cardId);
   if (!pf.ok) {
     toast('Сделка не отправлена', pf.errors[0].text, 'err');
@@ -73,6 +86,8 @@ export function execute(offer, volumeUsdt, cardId, method) {
   const deal = {
     id: uid('deal'),
     ref: 'P2D-' + Math.random().toString(36).slice(2, 8).toUpperCase(),
+    // ключ идемпотентности: бэкенд по нему отбивает повторную отправку одного ордера
+    idemKey: uid('idem') + Math.random().toString(36).slice(2, 10),
     side: offer.side,
     exchange: offer.exchange,
     asset: offer.asset,

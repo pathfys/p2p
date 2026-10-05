@@ -93,6 +93,7 @@ const ICONS = {
   bookmark: 'M6 3h12v18l-6-4.5L6 21V3Z',
   scale: 'M12 4v16M7 20h10M12 7 5 9l3.5 5L12 9l3.5 5L19 9l-7-2Z',
   activity: 'M3 12h4l3-7 4 14 3-7h4',
+  search: 'M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM21 21l-5.2-5.2',
 };
 
 export function icon(name, props = {}) {

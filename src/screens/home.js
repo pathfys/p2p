@@ -229,13 +229,21 @@ function tile(label, value, sub, tone = 'acid', spark = null) {
 
 function cardsBlock() {
   const hidden = state.ui.balanceHidden;
-  const total = state.cards.filter((c) => c.active).reduce((a, c) => a + c.balance, 0);
 
+  // карт нет — одна крупная плитка «+ Добавить карту»
+  if (!state.cards.length) {
+    return h('button.pay-card.add.empty', { onClick: () => openCardSheet() },
+      icon('plus'),
+      h('span', 'Добавить карту'),
+    );
+  }
+
+  const total = state.cards.filter((c) => c.active).reduce((a, c) => a + c.balance, 0);
   return h('div',
     h('div', { class: hidden ? 'balance-hidden' : '' },
       h('div.cards-rail',
         state.cards.map((c) => payCard(c)),
-        h('button.pay-card.add', { onClick: () => openCardSheet() }, icon('plus'), h('span', 'Добавить')),
+        h('button.pay-card.add', { onClick: () => openCardSheet() }, icon('plus'), h('span', 'Добавить карту')),
       ),
     ),
     h('div.wire', { style: { marginTop: '4px' } },
