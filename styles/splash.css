@@ -1,6 +1,6 @@
 /* =========================================================
    Загрузочный экран «P2P Light»
-   Кошелёк — позади надписи, карты разлетаются влево и вправо.
+   Кошелёк — позади надписи, карты разведены по противоположным углам.
    ========================================================= */
 #splash {
   position: fixed;
@@ -29,18 +29,6 @@
 #splash.is-gone {
   opacity: 0;
   transform: scale(1.06);
-  pointer-events: none;
-}
-
-/* тонкая сетка-подложка, как в терминале */
-#splash::before {
-  content: "";
-  position: absolute; inset: -10%;
-  background-image:
-    linear-gradient(to right, rgba(255,255,255,.045) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255,255,255,.045) 1px, transparent 1px);
-  background-size: 46px 46px;
-  mask-image: radial-gradient(70% 55% at 50% 45%, #000 20%, transparent 78%);
   pointer-events: none;
 }
 
@@ -147,16 +135,16 @@
   will-change: transform;
 }
 .sp-card.left {
-  width: min(42vw, 198px);
-  left: max(-11vw, -58px);
-  top: 54%;
+  width: min(33vw, 154px);
+  left: max(-7vw, -34px);
+  top: 62%;
   animation: sp-left 1.05s var(--ease-out) both;
   animation-delay: .12s;
 }
 .sp-card.right {
-  width: min(46vw, 214px);
-  right: max(-12vw, -64px);
-  top: 7%;
+  width: min(36vw, 168px);
+  right: max(-7vw, -36px);
+  top: 2%;
   animation: sp-right 1.05s var(--ease-out) both;
   animation-delay: .22s;
 }
@@ -202,19 +190,42 @@
   animation: sp-fade .6s var(--ease) both;
   animation-delay: .5s;
 }
-.sp-brand {
+.sp-sign {
   position: absolute;
-  bottom: calc(22px + env(safe-area-inset-bottom));
+  bottom: calc(26px + env(safe-area-inset-bottom));
   left: 0; right: 0;
   z-index: 3;
   text-align: center;
-  font-size: 9.5px;
-  letter-spacing: .26em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, .3);
-  animation: sp-fade .6s var(--ease) both;
-  animation-delay: .9s;
+  font-family: var(--font-ui);
+  font-size: clamp(15px, 4.4vw, 19px);
+  font-weight: 600;
+  font-stretch: 108%;
+  letter-spacing: .16em;
+  text-indent: .16em;
+  color: rgba(255, 255, 255, .78);
+  animation: sp-fade .7s var(--ease) both;
+  animation-delay: .95s;
 }
+.sp-sign b {
+  display: inline-block;
+  margin: 0 .12em;
+  font-weight: 700;
+  font-style: italic;
+  color: var(--acid);
+  text-shadow: 0 0 18px rgba(var(--acid-rgb), .55);
+}
+/* тонкие штрихи по бокам — подпись читается как марка, а не как сноска */
+.sp-sign::before, .sp-sign::after {
+  content: "";
+  display: inline-block;
+  vertical-align: middle;
+  width: clamp(18px, 7vw, 34px);
+  height: 1px;
+  margin: 0 .8em;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.3));
+}
+.sp-sign::after { background: linear-gradient(90deg, rgba(255,255,255,.3), transparent); }
+
 @keyframes sp-fade { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
