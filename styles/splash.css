@@ -1,6 +1,7 @@
 /* =========================================================
    Загрузочный экран «P2P Light»
-   Кошелёк — позади надписи, карты разведены по противоположным углам.
+   Предметы прилетают с разных сторон → затемнение → исчезают →
+   переключение на главный экран. Фон плоский, без подсветки.
    ========================================================= */
 #splash {
   position: fixed;
@@ -11,24 +12,14 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background:
-    radial-gradient(78% 52% at 50% 42%, rgba(var(--acid-rgb), .20), transparent 68%),
-    radial-gradient(120% 80% at 50% 118%, rgba(var(--acid-rgb), .10), transparent 60%),
-    #000;
-  /* на светлой теме сплэш всё равно чёрный — это заставка бренда */
+  background: #0b0d10;
   color: #fff;
-  transition: opacity .5s var(--ease), transform .5s var(--ease);
 }
-#splash::after {
+#splash::after {                 /* лёгкая зернистость, без свечения */
   content: "";
   position: absolute; inset: 0;
   background-image: var(--grain);
-  opacity: .05;
-  pointer-events: none;
-}
-#splash.is-gone {
-  opacity: 0;
-  transform: scale(1.06);
+  opacity: .04;
   pointer-events: none;
 }
 
@@ -41,7 +32,7 @@
   place-items: center;
 }
 
-/* ---------- кошелёк: позади надписи ---------- */
+/* ---------- кошелёк: позади надписи, прилетает снизу ---------- */
 .sp-wallet {
   position: absolute;
   width: min(54vw, 238px);
@@ -51,23 +42,9 @@
   filter: drop-shadow(0 26px 44px rgba(0, 0, 0, .65));
   animation: sp-wallet-in 1s var(--ease-out) both;
 }
-.sp-wallet-glow {
-  position: absolute;
-  z-index: 0;
-  width: min(74vw, 330px);
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(var(--acid-rgb), .34), transparent 66%);
-  filter: blur(26px);
-  animation: sp-glow 3.4s var(--ease) infinite;
-}
 @keyframes sp-wallet-in {
-  from { opacity: 0; transform: translateY(12%) scale(.78); }
-  to   { opacity: .95; transform: translateY(2%) scale(1); }
-}
-@keyframes sp-glow {
-  0%, 100% { opacity: .75; transform: scale(1); }
-  50%      { opacity: 1;   transform: scale(1.09); }
+  from { opacity: 0; transform: translateY(26%) scale(.8); }
+  to   { opacity: .96; transform: translateY(2%) scale(1); }
 }
 
 /* ---------- надпись ---------- */
@@ -77,13 +54,13 @@
   text-align: center;
   line-height: .9;
 }
-.sp-word::before {
+.sp-word::before {               /* подложка под текст, чтобы читался на кошельке */
   content: "";
   position: absolute;
   left: 50%; top: 50%;
   width: 150%; height: 190%;
   transform: translate(-50%, -50%);
-  background: radial-gradient(closest-side, rgba(0,0,0,.58), rgba(0,0,0,.28) 58%, transparent 78%);
+  background: radial-gradient(closest-side, rgba(11,13,16,.6), rgba(11,13,16,.28) 58%, transparent 78%);
   z-index: -1;
   pointer-events: none;
 }
@@ -96,10 +73,7 @@
   font-size: clamp(88px, 30vw, 184px);
   letter-spacing: -.045em;
   color: #fff;
-  text-shadow:
-    0 2px 0 rgba(0,0,0,.3),
-    0 18px 44px rgba(0,0,0,.75),
-    0 0 72px rgba(var(--acid-rgb), .45);
+  text-shadow: 0 2px 0 rgba(0,0,0,.3), 0 18px 44px rgba(0,0,0,.75);
 }
 .sp-p2p span {
   display: inline-block;
@@ -111,7 +85,6 @@
   from { opacity: 0; transform: translateY(34px) rotate(-5deg); }
   to   { opacity: 1; transform: none; }
 }
-
 .sp-light {
   margin-top: 6px;
   font-family: var(--font-ui);
@@ -119,20 +92,20 @@
   font-stretch: 112%;
   font-size: clamp(13px, 4.2vw, 19px);
   letter-spacing: .62em;
-  text-indent: .62em;            /* компенсировать трекинг справа */
+  text-indent: .62em;
   text-transform: uppercase;
   color: var(--acid);
   animation: sp-fade .7s var(--ease-out) both;
   animation-delay: .66s;
 }
 
-/* ---------- карты по сторонам ---------- */
+/* ---------- карты прилетают с разных сторон ---------- */
 .sp-card {
   position: absolute;
   z-index: 2;
   height: auto;
   filter: drop-shadow(0 22px 34px rgba(0, 0, 0, .6));
-  will-change: transform;
+  will-change: transform, opacity;
 }
 .sp-card.left {
   width: min(33vw, 154px);
@@ -149,11 +122,11 @@
   animation-delay: .22s;
 }
 @keyframes sp-left {
-  from { opacity: 0; transform: translate(-70%, 10%) rotate(-38deg) scale(.86); }
+  from { opacity: 0; transform: translate(-80%, 14%) rotate(-40deg) scale(.84); }
   to   { opacity: 1; transform: translate(0, -6%) rotate(-17deg); }
 }
 @keyframes sp-right {
-  from { opacity: 0; transform: translate(70%, -10%) rotate(40deg) scale(.86); }
+  from { opacity: 0; transform: translate(80%, -14%) rotate(42deg) scale(.84); }
   to   { opacity: 1; transform: translate(0, 0) rotate(15deg); }
 }
 
@@ -168,7 +141,7 @@
 .sp-bar {
   height: 3px;
   border-radius: 99px;
-  background: rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .1);
   overflow: hidden;
 }
 .sp-bar > i {
@@ -176,17 +149,19 @@
   height: 100%;
   width: 0;
   border-radius: 99px;
-  background: linear-gradient(90deg, var(--acid-dim), var(--acid));
-  box-shadow: 0 0 16px rgba(var(--acid-rgb), .7);
-  transition: width .45s var(--ease-out);
+  background: var(--acid);
+  animation: sp-progress 1.7s var(--ease-out) both;
+}
+@keyframes sp-progress {
+  from { width: 4%; }
+  to   { width: 94%; }
 }
 .sp-hint {
   margin-top: 11px;
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: .08em;
-  color: rgba(255, 255, 255, .5);
-  min-height: 15px;
+  color: rgba(255, 255, 255, .45);
   animation: sp-fade .6s var(--ease) both;
   animation-delay: .5s;
 }
@@ -212,9 +187,7 @@
   font-weight: 700;
   font-style: italic;
   color: var(--acid);
-  text-shadow: 0 0 18px rgba(var(--acid-rgb), .55);
 }
-/* тонкие штрихи по бокам — подпись читается как марка, а не как сноска */
 .sp-sign::before, .sp-sign::after {
   content: "";
   display: inline-block;
@@ -225,9 +198,27 @@
   background: linear-gradient(90deg, transparent, rgba(255,255,255,.3));
 }
 .sp-sign::after { background: linear-gradient(90deg, rgba(255,255,255,.3), transparent); }
-
 @keyframes sp-fade { from { opacity: 0; } to { opacity: 1; } }
 
+/* ---------- затемнение-вуаль ---------- */
+.sp-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------- уход: предметы разлетаются и гаснут, экран темнеет ---------- */
+#splash.is-leaving .sp-card.left  { transition: transform .5s var(--ease), opacity .45s var(--ease); transform: translate(-90%, 16%) rotate(-34deg) scale(.86); opacity: 0; }
+#splash.is-leaving .sp-card.right { transition: transform .5s var(--ease), opacity .45s var(--ease); transform: translate(90%, -16%) rotate(38deg) scale(.86); opacity: 0; }
+#splash.is-leaving .sp-wallet     { transition: transform .5s var(--ease), opacity .45s var(--ease); transform: translateY(16%) scale(.82); opacity: 0; }
+#splash.is-leaving .sp-word       { transition: transform .5s var(--ease), opacity .45s var(--ease); transform: translateY(-14px) scale(.96); opacity: 0; }
+#splash.is-leaving .sp-foot,
+#splash.is-leaving .sp-sign       { transition: opacity .3s var(--ease); opacity: 0; }
+#splash.is-leaving .sp-veil       { transition: opacity .5s var(--ease) .12s; opacity: 1; }
+
 @media (prefers-reduced-motion: reduce) {
-  #splash * { animation-duration: .01ms !important; }
+  #splash *, #splash.is-leaving * { animation-duration: .01ms !important; transition-duration: .18s !important; }
 }

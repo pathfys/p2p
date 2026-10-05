@@ -112,6 +112,15 @@ export function openOfferSheet(offerId) {
         ))),
       ),
 
+      /* --- условия контрагента (описание из ордера) --- */
+      offer.terms ? h('div',
+        h('div.section-title',
+          h('span.eyebrow', offer.side === 'buy' ? 'Условия продавца' : 'Условия покупателя'),
+          h('i.rule'),
+        ),
+        h('div.panel', h('div.offer-terms', offer.terms)),
+      ) : null,
+
       /* --- volume --- */
       h('div.section-title', h('span.eyebrow', 'Объём закупки'), h('i.rule')),
       h('div.panel',

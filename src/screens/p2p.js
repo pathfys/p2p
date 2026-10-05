@@ -10,7 +10,7 @@ import { state, set, on, PAY_METHODS } from '../core/store.js';
 import { fmtN, fmt0, compact, hhmmss } from '../core/format.js';
 import { EXCHANGES, EX, ASSETS, FIATS, FIAT } from '../data/exchanges.js';
 import { analyze, buildPlan, usdtToAsset } from '../services/analysis.js';
-import { resubscribe, recomputeMarket, feedMode, setFeedMode } from '../services/feed.js';
+import { resubscribe, recomputeMarket } from '../services/feed.js';
 import { clearLogs, exportLogs } from '../services/logs.js';
 import { openOfferSheet } from '../ui/offerSheet.js';
 import { openFilterSheet, activeFilterCount, SORTS } from '../ui/filterSheet.js';
@@ -114,19 +114,11 @@ export function P2PScreen({ slot }) {
     else el.textContent = text;
   }
 
-  /* ---- topbar mode toggle ---- */
-  const modeBtn = h('button.btn.btn-xs.btn-ghost', {
-    onClick: () => {
-      const next = feedMode() === 'live' ? 'mock' : 'live';
-      setFeedMode(next);
-      renderModeBtn();
-      toast(next === 'live' ? 'Режим LIVE' : 'Режим MOCK',
-        next === 'live' ? state.settings.wsUrl : 'Локальный генератор стаканов', 'info');
-    },
-  });
-  const renderModeBtn = () => mount(modeBtn, icon(feedMode() === 'live' ? 'globe' : 'cpu'), feedMode() === 'live' ? 'LIVE' : 'MOCK');
-  renderModeBtn();
-  slot.append(modeBtn);
+  /* ---- topbar: индикатор активного потока ---- */
+  slot.append(h('span.badge.badge-buy', { style: { gap: '5px' } },
+    h('i', { style: { width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor', boxShadow: '0 0 8px currentColor' }, class: 'pulse' }),
+    'онлайн',
+  ));
 
   /* ===================== header (built once, patched after) ===================== */
 

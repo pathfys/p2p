@@ -1,49 +1,38 @@
 /**
- * Загрузочный экран. Прогресс привязан к реальным этапам старта,
- * а не к таймеру — но держим минимальную выдержку, чтобы заставка не мигала.
+ * Загрузочный экран.
+ * Последовательность: предметы прилетают с разных сторон (CSS-анимация) →
+ * пауза → затемнение, предметы исчезают (.is-leaving) → снятие сплэша →
+ * под ним уже смонтирован главный экран.
  */
 import { qs } from '../core/dom.js';
 
-const MIN_VISIBLE = 1700;   // мс — сколько сплэш показывается минимум
 const t0 = Date.now();
+const HOLD = 1750;    // прилёт предметов + пауза до начала ухода, мс
+const LEAVE = 640;    // длительность затемнения/исчезновения, мс
 
-const STEPS = [
-  { at: 12,  text: 'инициализация…' },
-  { at: 34,  text: 'восстановление профиля' },
-  { at: 56,  text: 'подключение к биржам' },
-  { at: 78,  text: 'загрузка стаканов' },
-  { at: 100, text: 'готово' },
-];
+let leaving = false;
+let removed = false;
 
-let step = -1;
-let done = false;
-
-export function splashStep(i) {
-  if (done || i <= step) return;
-  step = Math.min(i, STEPS.length - 1);
-  const s = STEPS[step];
-  const bar = qs('#sp-progress');
-  const hint = qs('#sp-hint');
-  if (bar) bar.style.width = s.at + '%';
-  if (hint) hint.textContent = s.text;
+function removeSplash() {
+  if (removed) return;
+  removed = true;
+  qs('#splash')?.remove();
 }
 
-export function splashDone() {
-  if (done) return;
-  done = true;
-  splashStep(STEPS.length - 1);
-
-  const wait = Math.max(0, MIN_VISIBLE - (Date.now() - t0));
-  setTimeout(() => {
+/** Запустить уход сплэша (не раньше, чем предметы прилетят). */
+export function splashLeave() {
+  if (leaving) return;
+  leaving = true;
+  const run = () => {
     const el = qs('#splash');
     if (!el) return;
-    el.classList.add('is-gone');
-    el.addEventListener('transitionend', () => el.remove(), { once: true });
-    setTimeout(() => el.remove(), 900);     // подстраховка, если transitionend не придёт
-  }, wait);
+    el.classList.add('is-leaving');
+    setTimeout(removeSplash, LEAVE + 80);
+  };
+  setTimeout(run, Math.max(0, HOLD - (Date.now() - t0)));
 }
 
-/** Сплэш не должен залипать навсегда, если что-то пошло не так на старте. */
+/** Страховка: сплэш не должен залипнуть навсегда. */
 export function splashGuard(ms = 6000) {
-  setTimeout(splashDone, ms);
+  setTimeout(splashLeave, ms);
 }

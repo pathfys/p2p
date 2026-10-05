@@ -12,7 +12,7 @@ import { P2PScreen } from './screens/p2p.js';
 import { SettingsScreen } from './screens/settings.js';
 import { ProfileScreen } from './screens/profile.js';
 import { closeTopSheet, sheetOpen } from './ui/sheet.js';
-import { splashStep, splashDone, splashGuard } from './ui/splash.js';
+import { splashLeave, splashGuard } from './ui/splash.js';
 import { qs } from './core/dom.js';
 
 /* ---------- theme ---------- */
@@ -24,7 +24,6 @@ function applyTheme() {
 
 /* ---------- boot ---------- */
 function boot() {
-  splashStep(0);
   splashGuard();                     // сплэш не должен залипнуть, если старт упадёт
 
   applyTheme();
@@ -32,7 +31,6 @@ function boot() {
 
   initTelegram();
   rollDay();
-  splashStep(1);
 
   if (state.settings.hideBalanceDefault) set('ui', (u) => { u.balanceHidden = true; });
 
@@ -43,29 +41,22 @@ function boot() {
 
   renderTabbar();
   navigate(state.ui.tab || 'home');
-  splashStep(2);
 
   log('info', 'sys', `P2P Light запущен · ${inTelegram ? 'Telegram Mini App' : 'браузер'}`);
 
-  // прячем заставку, когда стаканы реально приехали
-  const off = on('offers', () => { off(); splashDone(); });
-  splashStep(3);
   startFeed();
+
+  // главный экран уже смонтирован под сплэшем — запускаем уход заставки
+  splashLeave();
 
   // Esc / browser back closes the top sheet
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && sheetOpen()) { e.preventDefault(); closeTopSheet(); }
   });
 
-  // pause the simulated feed while hidden to save battery
   document.addEventListener('visibilitychange', () => {
     log('info', 'sys', document.hidden ? 'приложение в фоне' : 'приложение активно');
   });
-
-  if (!inTelegram) {
-    console.info('%cP2P Light', 'color:#f7a600;font-weight:700',
-      'запущен вне Telegram — SDK в режиме заглушки, фид в режиме', state.settings.feedMode);
-  }
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

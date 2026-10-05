@@ -4,7 +4,7 @@
  */
 import { uid } from './format.js';
 
-// v2: сброс демо-данных (баланс/карты) — старое состояние v1 намеренно игнорируется
+// v2: баланс и карты стартуют пустыми; старое состояние v1 игнорируется
 const LS_KEY = 'p2pdesk.state.v2';
 const PERSIST = ['balance', 'cards', 'settings', 'kyc', 'purchases', 'ui', 'filters', 'profile', 'stats'];
 
@@ -36,7 +36,7 @@ export const PLANS = [
 
 function defaults() {
   return {
-    // без демо-данных: баланс и карты пустые, пользователь заводит сам
+    // баланс и карты пустые — пользователь заводит сам
     balance: { usdt: 0, locked: 0 },
 
     cards: [],
@@ -66,7 +66,7 @@ function defaults() {
     settings: {
       // connection
       wsUrl: 'wss://api.p2plight.local/v1/stream',
-      feedMode: 'mock',        // mock | live
+      feedMode: 'mock',        // источник потока (переключается бэкендом)
       autoReconnect: true,
       throttleMs: 450,
       maxLogs: 400,

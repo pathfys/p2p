@@ -414,7 +414,7 @@ export function ProfileScreen() {
     h('div', { style: { '--i': 6 } }, security),
     title('Статистика', 7),
     h('div', { style: { '--i': 8 } }, statsSlot),
-    h('div.foot-note', inTelegram ? 'Запущено как Telegram Mini App' : 'Запущено в браузере · Telegram SDK в режиме заглушки'),
+    h('div.foot-note', inTelegram ? 'Запущено как Telegram Mini App' : 'Веб-версия'),
   );
 
   return { node: root, destroy: () => unsubs.forEach((u) => u()) };

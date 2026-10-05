@@ -4,23 +4,16 @@
 .hero {
   position: relative;
   padding: 20px 18px 18px;
-  border-radius: var(--r-xl);
-  border: 1px solid var(--line);
-  background:
-    radial-gradient(120% 90% at 100% 0%, rgba(var(--acid-rgb),.12), transparent 55%),
-    linear-gradient(180deg, var(--panel-2), var(--panel));
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-soft);
+  background: var(--panel);
   overflow: hidden;
   box-shadow: var(--shadow-1);
 }
 .hero::before {
   content: "";
   position: absolute; inset: 0;
-  background-image:
-    linear-gradient(to right, var(--line-soft) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--line-soft) 1px, transparent 1px);
-  background-size: 28px 28px;
-  opacity: .5;
-  mask-image: radial-gradient(90% 70% at 0% 100%, #000, transparent 70%);
+  background: radial-gradient(120% 90% at 100% -10%, var(--acid-ghost), transparent 55%);
   pointer-events: none;
 }
 .hero > * { position: relative; }
@@ -222,6 +215,16 @@
 }
 .book-search-clear svg { width: 13px; height: 13px; }
 .book-search-clear:active { transform: scale(.92); }
+
+/* условия контрагента в карточке ордера */
+.offer-terms {
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* подсветка совпадений */
 mark.hl {

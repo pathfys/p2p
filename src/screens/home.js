@@ -174,7 +174,7 @@ export function openBalanceSheet(mode = 'set') {
       ),
       mode !== 'set' ? quick : null,
       h('div.note', { style: { marginTop: '14px' } }, icon('info'),
-        'Это локальный (демо) баланс мини-аппа. На проде баланс приходит из бэкенда и сверяется с кастодиальным кошельком.'),
+        'Баланс кошелька. На проде синхронизируется с бэкендом и кастодиальным кошельком.'),
     ),
     foot: [
       h('button.btn.btn-ghost', { onClick: () => api.close() }, 'Отмена'),

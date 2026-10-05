@@ -10,7 +10,7 @@
  */
 import { state, emit, set } from '../core/store.js';
 import { EXCHANGES, EX, AST, FIAT_METHODS } from '../data/exchanges.js';
-import { mulberry, hashStr, merchantName } from '../data/merchants.js';
+import { mulberry, hashStr, merchantName, merchantTerms } from '../data/merchants.js';
 import { log } from './logs.js';
 
 let mode = 'mock';
@@ -97,7 +97,7 @@ export function startFeed() {
   if (running) return;
   running = true;
   mode = state.settings.feedMode;
-  log('info', 'sys', `Запуск фида · режим <b>${mode === 'live' ? 'LIVE WS' : 'MOCK'}</b>`);
+  log('info', 'sys', 'Поток данных <b>запущен</b>');
   if (mode === 'live') connectWs(); else startMock();
   statusTimer = setInterval(heartbeat, 2000);
 }
@@ -341,6 +341,7 @@ function normalizeOffer(o) {
       blocked: Boolean(m.blocked),
     },
     kycRequired: Math.min(3, Math.max(0, Math.round(num(o.kycRequired) || 0))),
+    terms: typeof o.terms === 'string' ? o.terms.slice(0, 600) : '',
     ts: Number.isFinite(num(o.ts)) ? num(o.ts) : Date.now(),
   };
 }
@@ -460,6 +461,7 @@ class MockVenue {
         blocked: r() < 0.04,
       },
       kycRequired: r() < 0.5 ? 1 : r() < 0.85 ? 2 : 0,
+      terms: merchantTerms(r),
       ts: Date.now(),
     };
     this.offers.set(id, offer);

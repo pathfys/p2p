@@ -4,7 +4,7 @@ import { state, set, on, resetAll, exportState, importState } from '../core/stor
 import { fmt0, compact } from '../core/format.js';
 import { EXCHANGES } from '../data/exchanges.js';
 import { WEIGHT_LABELS } from '../services/analysis.js';
-import { restartFeed, setFeedMode, feedMode } from '../services/feed.js';
+import { restartFeed } from '../services/feed.js';
 import { openSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
@@ -57,49 +57,22 @@ export function SettingsScreen() {
 
   const title = (text, i, aside) => h('div.section-title', { style: { '--i': i } }, h('span.eyebrow', text), h('i.rule'), aside || null);
 
-  /* ---------- connection ---------- */
-
-  const wsInput = h('input.input.mono', {
-    value: state.settings.wsUrl, spellcheck: 'false',
-    onChange: (e) => {
-      const v = e.target.value.trim();
-      if (!/^wss?:\/\/.+/.test(v)) { e.target.value = state.settings.wsUrl; return toast('Нужен URL вида wss://host/path', null, 'err'); }
-      set('settings', (s) => { s.wsUrl = v; });
-      toast('Эндпоинт сохранён', v, 'ok');
-    },
-  });
-
-  const modeSeg = h('div.seg',
-    ['mock', 'live'].map((m) => h('button', {
-      'aria-pressed': String(state.settings.feedMode === m),
-      onClick: (e) => {
-        setFeedMode(m);
-        for (const b of e.target.parentNode.children) b.setAttribute('aria-pressed', 'false');
-        e.target.setAttribute('aria-pressed', 'true');
-        toast(m === 'live' ? 'LIVE WebSocket' : 'MOCK генератор', m === 'live' ? state.settings.wsUrl : 'Данные генерируются локально', 'info');
-      },
-    }, m === 'mock' ? 'MOCK (демо)' : 'LIVE (WS)')),
-  );
+  /* ---------- поток данных ---------- */
 
   const connection = h('div',
     h('div.panel.panel-body',
-      h('label.field', h('span.label', 'Источник данных', h('span.hint', 'бэкенд ещё не подключён')), modeSeg),
-      h('label.field', h('span.label', 'WebSocket эндпоинт'), wsInput),
       h('div.grid-2',
-        num('Троттлинг, мс', 'throttleMs', { hint: '120–3000', min: 120, onAfter: () => restartFeed() }),
+        num('Скорость обновления, мс', 'throttleMs', { hint: '120–3000', min: 120, onAfter: () => restartFeed() }),
         num('Буфер логов', 'maxLogs', { hint: 'записей', min: 50 }),
       ),
     ),
     h('div.panel',
-      sw('Авто-переподключение', 'Экспоненциальный backoff до 30 с', 'autoReconnect'),
-      h('button.row', { onClick: () => { restartFeed(); toast('Фид перезапущен', null, 'ok'); } },
+      h('button.row', { onClick: () => { restartFeed(); toast('Поток перезапущен', null, 'ok'); } },
         h('div.deal-ico', icon('refresh')),
-        h('div.row-main', h('div.row-title', 'Перезапустить фид'), h('div.row-sub', 'Сброс стаканов и повторная подписка')),
+        h('div.row-main', h('div.row-title', 'Перезапустить поток'), h('div.row-sub', 'Сброс стаканов и повторная подписка')),
         icon('chev', { class: 'row-chev' }),
       ),
     ),
-    h('div.note', { style: { marginTop: '10px' } }, icon('info'),
-      h('div', 'В режиме LIVE фронт говорит по собственному протоколу (', h('code', 'docs/ws-protocol.md'), '). Адаптеры бирж живут на бэкенде — ключи и подписи не попадают в мини-апп.')),
   );
 
   /* ---------- trading ---------- */
@@ -198,7 +171,7 @@ export function SettingsScreen() {
         }),
       ),
       h('div.note', { style: { marginTop: '10px' } }, icon('key'),
-        'API-ключи хранятся только в localStorage этого устройства и используются для приватных эндпоинтов (лимиты, собственные объявления). Публичные стаканы читаются без ключей.'),
+        'API-ключи хранятся только в localStorage этого устройства и используются для приватных запросов (лимиты, собственные объявления). Публичные стаканы читаются без ключей.'),
     );
   }
   renderExchanges();
@@ -321,7 +294,7 @@ export function SettingsScreen() {
   unsubs.push(on('settings', () => { /* persisted automatically */ }));
 
   root.append(
-    title('Соединение', 0, h('span.badge', { class: feedMode() === 'live' ? 'badge-buy' : 'badge-acid' }, feedMode())),
+    title('Поток данных', 0, h('span.badge.badge-buy', 'онлайн')),
     h('div', { style: { '--i': 1 } }, connection),
     title('Трейдинг', 2),
     h('div', { style: { '--i': 3 } }, trading),
@@ -335,7 +308,7 @@ export function SettingsScreen() {
     h('div', { style: { '--i': 11 } }, appearance),
     title('Данные', 12),
     h('div', { style: { '--i': 13 } }, data),
-    h('div.foot-note', `P2P Light · сборка фронтенда · ${compact(Object.keys(state.offers).length)} оферов в памяти`),
+    h('div.foot-note', `P2P Light · ${compact(Object.keys(state.offers).length)} оферов в потоке`),
   );
 
   return { node: root, destroy: () => unsubs.forEach((u) => u()) };
