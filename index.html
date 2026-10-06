@@ -219,23 +219,52 @@ ul, ol { list-style: none; }
 }
 .topbar > * { position: relative; }
 
-.brand { display: flex; align-items: center; gap: 9px; margin-right: auto; }
-.brand-mark {
-  width: 26px; height: 26px;
-  display: grid; place-items: center;
-  background: var(--acid);
-  color: var(--acid-ink);
-  border-radius: 7px;
-  font-weight: 800;
-  font-size: 13px;
-  font-stretch: 120%;
-  box-shadow: 0 0 20px -4px rgba(var(--acid-rgb),.55);
+.brand { display: flex; align-items: center; margin-right: auto; min-width: 0; }
+
+/* ---- 3D-вордмарк «P2P light» вместо текстового заголовка ---- */
+.logo3d {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  user-select: none;
+  line-height: 1;
+  padding: 2px 0 4px;
 }
-:root[data-theme="light"] .brand-mark { box-shadow: none; }
-.brand-name { font-size: 15px; }
-.brand-sub {
-  font-size: 8.5px; letter-spacing: .18em; text-transform: uppercase;
-  color: var(--ink-4); margin-top: -2px;
+.logo3d-p2p {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 20px;
+  letter-spacing: -.03em;
+  color: var(--acid);
+  /* экструзия: слои теней вниз-вправо дают объём + мягкое свечение бренда */
+  text-shadow:
+    1px 1px 0 var(--acid-dim),
+    2px 2px 0 #9a6700,
+    3px 3px 0 #704c00,
+    4px 4px 0 #4e3500,
+    5px 6px 10px rgba(0,0,0,.55),
+    0 0 20px rgba(var(--acid-rgb), .45);
+}
+.logo3d-light {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: .01em;
+  color: var(--ink);
+  text-shadow:
+    1px 1px 0 rgba(0,0,0,.55),
+    2px 2px 0 rgba(0,0,0,.3),
+    3px 4px 7px rgba(0,0,0,.45);
+}
+:root[data-theme="light"] .logo3d-p2p {
+  text-shadow:
+    1px 1px 0 var(--acid-dim),
+    2px 2px 0 #c58a00,
+    3px 3px 0 #a06f00,
+    4px 5px 7px rgba(18,18,20,.22);
+}
+:root[data-theme="light"] .logo3d-light {
+  text-shadow: 1px 1px 0 rgba(18,18,20,.16), 2px 3px 4px rgba(18,18,20,.12);
 }
 
 main {
@@ -252,7 +281,7 @@ main {
   height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   max-width: 560px;
   margin: 0 auto;
   background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
@@ -268,13 +297,15 @@ main {
   color: var(--ink-4);
   position: relative;
   transition: color .22s var(--ease);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 650;
-  letter-spacing: .04em;
+  letter-spacing: .02em;
   text-transform: uppercase;
-  font-stretch: 110%;
+  font-stretch: 105%;
+  white-space: nowrap;
 }
-.tab svg { width: 21px; height: 21px; stroke-width: 1.7; }
+.tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.tab svg { width: 20px; height: 20px; stroke-width: 1.7; }
 .tab::before {
   content: "";
   position: absolute; top: 0; left: 50%;
@@ -366,6 +397,8 @@ main {
 .btn-sell { background: var(--sell); color: #1b0407; border-color: var(--sell); font-weight: 750; }
 .btn-ghost { background: transparent; border-color: var(--line); }
 .btn-ghost:hover { background: var(--panel-2); }
+.btn-soft { background: var(--panel-3); border-color: var(--line); color: var(--ink); font-weight: 700; }
+.btn-soft:hover { background: color-mix(in srgb, var(--panel-3) 70%, var(--ink-4)); }
 .btn-danger { background: var(--sell-ghost); color: var(--sell); border-color: color-mix(in srgb, var(--sell) 35%, transparent); }
 .btn-sm { height: 32px; padding: 0 11px; font-size: 12.5px; border-radius: var(--r-sm); }
 .btn-xs { height: 26px; padding: 0 9px; font-size: 11px; border-radius: 7px; font-weight: 650; }
@@ -469,6 +502,10 @@ main {
   margin-bottom: 6px;
 }
 .field > .label .hint { margin-left: auto; flex: 0 0 auto; font-size: 10px; letter-spacing: 0; text-transform: none; color: var(--ink-4); font-weight: 500; }
+
+/* пояснительный текст под настройкой */
+.set-desc { margin: 7px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--ink-3); }
+.switch-row + .set-desc { margin: -4px 0 0; padding: 0 14px 11px; }
 
 .input, .select, .textarea {
   width: 100%;
@@ -1213,30 +1250,58 @@ mark.hl {
 .pro-name { font-size: 17px; font-weight: 750; letter-spacing: -.015em; display: flex; align-items: center; gap: 6px; }
 .pro-sub { font-size: 12px; color: var(--ink-3); margin-top: 2px; font-family: var(--font-mono); }
 
-.plan {
-  padding: 14px;
+/* =========================================================
+   подписка (тарифы)
+   ========================================================= */
+.sub-status {
+  padding: 13px 14px;
   border-radius: var(--r-lg);
   border: 1px solid var(--line);
-  background: radial-gradient(120% 100% at 100% 0%, rgba(var(--acid-rgb),.12), transparent 60%), var(--panel);
+  background: var(--panel);
 }
-.plan-top { display: flex; align-items: center; gap: 8px; }
-.plan-name { font-size: 16px; font-weight: 800; font-stretch: 115%; text-transform: uppercase; letter-spacing: -.01em; }
-.usage { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
-.usage-row .ur-top { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; margin-bottom: 5px; }
-.usage-row .ur-top .l { color: var(--ink-3); flex: 1; }
-.usage-row .ur-top .v { font-family: var(--font-mono); font-size: 11.5px; }
+.sub-status.is-on {
+  border-color: var(--acid-dim);
+  background: radial-gradient(130% 120% at 100% 0%, rgba(var(--acid-rgb),.14), transparent 62%), var(--panel);
+}
+.sub-status.is-off { border-color: color-mix(in srgb, var(--sell) 42%, var(--line)); }
+.sub-status-row { display: flex; align-items: center; gap: 11px; }
 
-.plan-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
-.plan-card {
-  padding: 11px 9px; text-align: center;
+.sub-list { display: flex; flex-direction: column; gap: 9px; }
+.sub-card {
+  position: relative;
+  padding: 13px 14px;
   border: 1px solid var(--line-soft);
-  border-radius: var(--r-md);
-  background: var(--panel-2);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  overflow: hidden;
 }
-.plan-card.is-active { border-color: var(--acid-dim); background: var(--acid-ghost); }
-.plan-card .pn { font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; }
-.plan-card .pp { font-family: var(--font-mono); font-size: 15px; font-weight: 700; margin-top: 4px; }
-.plan-card .pu { font-size: 9.5px; color: var(--ink-4); }
+.sub-card.is-current { border-color: var(--acid-dim); }
+.sub-card.is-top {
+  border-color: color-mix(in srgb, var(--acid) 55%, var(--line));
+  background: radial-gradient(150% 120% at 100% 0%, rgba(var(--acid-rgb),.10), transparent 58%), var(--panel);
+}
+.sub-ribbon {
+  position: absolute; top: 10px; right: -30px;
+  transform: rotate(38deg);
+  background: linear-gradient(100deg, var(--acid), #ffd36b);
+  color: #1a1203;
+  font-size: 8px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  padding: 3px 34px;
+  box-shadow: 0 4px 12px -4px rgba(247,166,0,.7);
+}
+.sub-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.sub-name {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 16px; font-weight: 800; font-stretch: 112%; letter-spacing: -.01em;
+}
+.sub-crown { width: 15px; height: 15px; color: var(--acid); }
+.sub-term { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+.sub-price { text-align: right; white-space: nowrap; }
+.sub-amount { font-family: var(--font-mono); font-size: 19px; font-weight: 700; color: var(--acid); }
+.sub-per { display: block; font-size: 9.5px; color: var(--ink-4); margin-top: 1px; }
+.sub-perks { list-style: none; margin: 11px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sub-perks li { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--ink-2); line-height: 1.35; }
+.sub-perks li svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 1px; }
 
 /* =========================================================
    purchases (закупки)
@@ -1534,6 +1599,107 @@ mark.hl {
   box-shadow: inset 2px 0 0 var(--acid);
 }
 .offer.is-best1 .of-price .p { color: var(--acid); }
+.best-tag svg { width: 9px; height: 9px; margin-right: 3px; }
+/* заблокированный лучший стакан (нет тарифа «3 месяца») */
+.offer.is-locked .best-tag {
+  background: color-mix(in srgb, var(--ink-4) 22%, transparent);
+  color: var(--ink-3); border-color: var(--line);
+  box-shadow: none;
+}
+.offer.is-locked .best-tag.top1 { background: color-mix(in srgb, var(--ink-4) 26%, transparent); color: var(--ink-2); }
+
+/* шторка апселла лучших стаканов */
+.gate-hero {
+  width: 62px; height: 62px; margin: 4px auto 14px;
+  display: grid; place-items: center;
+  border-radius: 18px;
+  background: radial-gradient(120% 120% at 50% 0%, rgba(var(--acid-rgb),.3), transparent 70%), var(--panel-2);
+  border: 1px solid var(--acid-dim);
+  box-shadow: 0 0 28px -8px rgba(var(--acid-rgb),.6);
+}
+.gate-hero svg { width: 30px; height: 30px; color: var(--acid); }
+.gate-lead { font-size: 13.5px; line-height: 1.5; color: var(--ink-2); text-align: center; margin: 0; }
+.gate-lead b { color: var(--acid); font-weight: 750; }
+.gate-row { display: flex; align-items: center; gap: 9px; padding: 10px 14px; font-size: 12.5px; }
+.gate-row + .gate-row { border-top: 1px solid var(--line-soft); }
+.gate-row svg { width: 15px; height: 15px; flex: 0 0 auto; }
+
+/* =========================================================
+   Топ — рейтинг мерчантов (подиум + таблица лидеров)
+   ========================================================= */
+.lb-ava {
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  border-radius: 11px;
+  font-weight: 800; font-size: 15px; color: #07090a;
+}
+
+/* --- подиум top-3 --- */
+.podium {
+  display: grid; grid-template-columns: 1fr 1.12fr 1fr;
+  align-items: end; gap: 8px;
+}
+.pod-col {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 14px 8px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+}
+.pod-col.r1 {
+  border-color: var(--acid-dim);
+  background: radial-gradient(130% 120% at 50% 0%, rgba(var(--acid-rgb),.16), transparent 62%), var(--panel);
+  box-shadow: 0 -2px 0 var(--acid) inset, var(--shadow-1);
+  padding-top: 22px;
+}
+.pod-col.r2 { box-shadow: 0 -2px 0 #c7ccd6 inset; }
+.pod-col.r3 { box-shadow: 0 -2px 0 #cd7f3a inset; }
+.pod-medal { position: absolute; top: -12px; width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--panel-3); border: 1px solid var(--line); }
+.pod-medal svg { width: 15px; height: 15px; }
+.pod-col.r1 .pod-medal { background: linear-gradient(100deg, var(--acid), #ffd36b); border: none; }
+.pod-col.r1 .pod-medal svg { color: #1a1203; }
+.pod-col.r2 .pod-medal svg { color: #c7ccd6; }
+.pod-col.r3 .pod-medal svg { color: #cd7f3a; }
+.pod-col .lb-ava { margin-top: 6px; }
+.pod-name { font-size: 12.5px; font-weight: 700; margin-top: 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pod-ex { font-size: 9.5px; color: var(--ink-4); margin-top: 1px; }
+.pod-val { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--acid); margin-top: 7px; }
+.pod-col.r2 .pod-val, .pod-col.r3 .pod-val { color: var(--ink); }
+.pod-unit { display: block; font-size: 8.5px; color: var(--ink-4); letter-spacing: .06em; text-transform: uppercase; }
+.pod-bar { width: 100%; margin-top: 10px; border-radius: 4px; background: var(--panel-3); }
+.pod-col.r1 .pod-bar { height: 30px; background: linear-gradient(var(--acid-ghost), transparent); }
+.pod-col.r2 .pod-bar { height: 20px; }
+.pod-col.r3 .pod-bar { height: 14px; }
+.pod-rank { position: absolute; bottom: 8px; font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--ink-4); }
+
+/* --- таблица лидеров 4..30 --- */
+.lb-row {
+  display: flex; align-items: center; gap: 11px;
+  width: 100%; text-align: left;
+  padding: 10px 14px;
+}
+.lb-row + .lb-row { border-top: 1px solid var(--line-soft); }
+.lb-rank {
+  flex: 0 0 auto; width: 22px; text-align: center;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--ink-4);
+}
+.lb-main { flex: 1; min-width: 0; }
+.lb-name { display: flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 650; }
+.lb-name svg { width: 13px; height: 13px; }
+.lb-sub { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--ink-3); margin-top: 2px; font-family: var(--font-mono); }
+.lb-sub .ex-tag {
+  flex: 0 0 auto;
+  font-size: 8px; font-weight: 800; letter-spacing: .06em;
+  padding: 1px 4px; border-radius: 4px;
+  background: var(--ex-c, var(--panel-3)); color: #07090a;
+  text-transform: uppercase;
+}
+.lb-val { flex: 0 0 auto; text-align: right; }
+.lb-v { font-family: var(--font-mono); font-size: 14px; font-weight: 700; }
+.lb-u { font-size: 8.5px; color: var(--ink-4); margin-left: 3px; letter-spacing: .04em; text-transform: uppercase; }
+.lb-v2 { font-size: 10px; color: var(--ink-4); margin-top: 1px; font-family: var(--font-mono); }
 
 /* ===== styles/splash.css ===== */
 /* =========================================================
@@ -1792,11 +1958,7 @@ mark.hl {
 <div id="app">
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark">P2</div>
-      <div>
-        <div class="brand-name display" id="screen-title">P2P LIGHT</div>
-        <div class="brand-sub" id="screen-sub">ai p2p terminal</div>
-      </div>
+      <div class="logo3d" aria-label="P2P Light" data-text="P2P"><span class="logo3d-p2p">P2P</span><span class="logo3d-light">light</span></div>
     </div>
     <div id="topbar-slot" style="display:flex;align-items:center;gap:8px"></div>
   </header>
@@ -1812,4 +1974,3 @@ mark.hl {
 <script src="./app.js"></script>
 </body>
 </html>
-
