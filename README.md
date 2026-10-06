@@ -16,11 +16,15 @@ python3 -m http.server 8080
 # → http://localhost:8080
 ```
 
-### Сборка в один файл
+### Сборка
 
 ```bash
-python3 tools/bundle.py          # → dist/index.html (~398 KB)
+python3 tools/bundle.py            # → dist/index.html + dist/app.js
+SINGLE=1 python3 tools/bundle.py   # → один файл dist/index.html
 ```
+
+По умолчанию собираются два файла: `index.html` (разметка + встроенный CSS) и
+`app.js` (весь JS). `SINGLE=1` кладёт всё в один `index.html`.
 
 CSS, все модули и графика (иконки монет, ассеты сплэша) встраиваются внутрь;
 снаружи остаются только Google Fonts и Telegram WebApp SDK. Такой файл

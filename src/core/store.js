@@ -312,12 +312,29 @@ export function questProgress() {
   return { list, doneCount, total: QUESTS.length, allDone: doneCount === QUESTS.length };
 }
 
-/** Забрать приз за выполнение всех заданий недели → +1 прокрут. */
+/* ---------- колесо: защита от абуза ---------- */
+
+export const MAX_SPINS = 50;          // потолок прокрутов (ограничивает урон при подмене localStorage)
+
+/** Изменить баланс прокрутов с зажимом в [0, MAX_SPINS]. */
+export function addSpins(n) {
+  set('wheel', (w) => { w.spins = Math.max(0, Math.min(MAX_SPINS, (w.spins || 0) + n)); });
+  return state.wheel.spins;
+}
+
+/** Списать один прокрут атомарно; false — если прокрутов нет. */
+export function consumeSpin() {
+  if ((state.wheel.spins || 0) <= 0) return false;
+  set('wheel', (w) => { w.spins = Math.max(0, w.spins - 1); });
+  return true;
+}
+
+/** Забрать приз за выполнение всех заданий недели → +1 прокрут (одноразово в неделю). */
 export function claimQuestReward() {
   const p = questProgress();
   if (!p.allDone || state.quests.claimed) return false;
   set('quests', (q) => { q.claimed = true; });
-  set('wheel', (w) => { w.spins += 1; });
+  addSpins(1);
   return true;
 }
 

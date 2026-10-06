@@ -148,24 +148,40 @@ js = runtime + '\n'.join(bundle) + f'\n  __req({json.dumps(ENTRY)});\n}})();\n'
 # ---------- css ----------
 css = '\n'.join(f'/* ===== {p} ===== */\n' + open(os.path.join(ROOT, p), encoding='utf-8').read() for p in CSS)
 
-# ---------- html ----------
+# ---------- два файла: index.html (+ CSS) и app.js ----------
+SPLIT = os.environ.get('SINGLE', '') != '1'    # по умолчанию раздельно; SINGLE=1 → один файл
+APP_OUT = os.path.join(os.path.dirname(OUT), 'app.js')
+
 html = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
 html = re.sub(r'\n?\s*<link rel="stylesheet" href="\./styles/[^"]+">', '', html)
-html = html.replace('<script type="module" src="./src/main.js"></script>',
-                    '<script>\n' + js + '</script>')
+
+app_js = None
+if SPLIT:
+    app_js = '/* P2P Light — bundled app. github.com/pathfys/p2p */\n' + js
+    html = html.replace('<script type="module" src="./src/main.js"></script>',
+                        '<script src="./app.js"></script>')
+    note = '<!-- index.html: разметка + встроенный CSS. Логика — в app.js рядом. -->'
+else:
+    html = html.replace('<script type="module" src="./src/main.js"></script>',
+                        '<script>\n' + js + '</script>')
+    note = '<!-- Self-contained: CSS, JS и графика в одном файле. -->'
+
 html = html.replace('</head>', '<style>\n' + css + '\n</style>\n</head>')
 html = inline_images(html)
 html = html.replace('<title>P2P Light — AI P2P Terminal</title>',
-                    '<title>P2P Light — AI P2P Terminal</title>\n'
-                    '<!-- Self-contained сборка: CSS, JS и иконки монет встроены в этот файл.\n'
-                    '     Внешние зависимости только две: Google Fonts и Telegram WebApp SDK.\n'
-                    '     Исходники: github.com/pathfys/p2p -->')
+                    '<title>P2P Light — AI P2P Terminal</title>\n' + note)
 
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 with open(OUT, 'w', encoding='utf-8') as f:
     f.write(html)
+if app_js is not None:
+    with open(APP_OUT, 'w', encoding='utf-8') as f:
+        f.write(app_js)
+elif os.path.exists(APP_OUT):
+    os.remove(APP_OUT)
 
 print(f'модулей: {len(order)}')
 print(f'картинки: сэкономлено {saved/1024:.0f} KB')
-print(f'размер : {os.path.getsize(OUT)/1024:.0f} KB')
-print(f'файл   : {OUT}')
+print(f'index.html: {os.path.getsize(OUT)/1024:.0f} KB')
+if app_js is not None:
+    print(f'app.js    : {os.path.getsize(APP_OUT)/1024:.0f} KB')

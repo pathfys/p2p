@@ -637,10 +637,22 @@ mark.hl {
 .fw-wheel {
   position: absolute; inset: 0;
   border-radius: 50%;
-  border: 6px solid var(--panel-3);
-  box-shadow: 0 0 0 2px var(--line), 0 18px 40px -14px rgba(0,0,0,.7), inset 0 0 30px rgba(0,0,0,.35);
+  border: 7px solid #10131a;
+  box-shadow:
+    0 0 0 3px #272c38,
+    0 0 0 9px rgba(247,166,0,.12),
+    0 22px 48px -14px rgba(0,0,0,.75),
+    inset 0 0 36px rgba(0,0,0,.4);
   transform: rotate(0deg);
   will-change: transform;
+}
+/* глянцевый блик сверху */
+.fw-wheel::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(70% 55% at 50% 18%, rgba(255,255,255,.22), transparent 60%);
+  pointer-events: none;
 }
 .fw-label {
   position: absolute; inset: 0;
@@ -660,17 +672,17 @@ mark.hl {
 .fw-hub {
   position: absolute;
   top: 50%; left: 50%;
-  width: 54px; height: 54px;
+  width: 58px; height: 58px;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: var(--panel);
-  border: 3px solid var(--panel-3);
+  background: radial-gradient(circle at 50% 32%, #2a2f3b, #14171f 70%);
+  border: 3px solid #0d0f15;
   display: grid; place-items: center;
   color: var(--acid);
-  box-shadow: 0 6px 16px -6px rgba(0,0,0,.6);
+  box-shadow: 0 8px 18px -6px rgba(0,0,0,.7), inset 0 2px 3px rgba(255,255,255,.1), 0 0 18px -4px rgba(247,166,0,.5);
   z-index: 2;
 }
-.fw-hub svg { width: 22px; height: 22px; }
+.fw-hub svg { width: 24px; height: 24px; filter: drop-shadow(0 0 6px rgba(247,166,0,.6)); }
 .fw-pointer {
   position: absolute;
   top: -10px; left: 50%;
@@ -790,5 +802,36 @@ mark.hl {
 .quest-check.is-done { background: var(--buy-ghost); color: var(--buy); border-color: color-mix(in srgb, var(--buy) 30%, transparent); }
 .quest-check svg { width: 16px; height: 16px; }
 .quest-body { flex: 1; min-width: 0; }
-.quest-name { font-size: 13.5px; font-weight: 550; }
+.quest-name { font-size: 13.5px; font-weight: 600; }
+.quest-status { font-size: 11px; margin-top: 2px; }
 .quest-val { font-size: 12px; color: var(--ink-3); flex: 0 0 auto; }
+.quest-row.is-done .quest-name { color: var(--ink); }
+
+/* =========================================================
+   Метка лучших стаканов
+   ========================================================= */
+.of-best { display: inline-flex; flex: 0 0 auto; }
+.best-tag {
+  display: inline-flex; align-items: center;
+  height: 15px; padding: 0 5px;
+  border-radius: 4px;
+  font-size: 8.5px; font-weight: 800; letter-spacing: .04em;
+  text-transform: uppercase;
+  background: var(--acid-ghost); color: var(--acid);
+  border: 1px solid color-mix(in srgb, var(--acid) 36%, transparent);
+  white-space: nowrap;
+}
+.best-tag.top1 {
+  background: linear-gradient(100deg, var(--acid), #ffd36b);
+  color: #1a1203; border: none;
+  box-shadow: 0 0 10px -2px rgba(247,166,0,.6);
+}
+.offer.is-best::before {
+  /* подсветка строки лучшего стакана поверх depth-бара */
+  background: linear-gradient(to right, var(--acid-ghost), transparent 60%) !important;
+  width: 100% !important;
+}
+.offer.is-best1 {
+  box-shadow: inset 2px 0 0 var(--acid);
+}
+.offer.is-best1 .of-price .p { color: var(--acid); }

@@ -370,6 +370,17 @@ export function P2PScreen({ slot }) {
   let lastOrder = [];
   let lastReorder = 0;
   let emptyEl = null;
+  let bestRankMap = new Map();   // offerId -> 0|1|2 (лучшие стаканы)
+
+  /** Лёгкая оценка качества офера: цена + репутация + ликвидность. */
+  function quickScore(o) {
+    const med = state.market.median;
+    const dev = med ? (state.filters.side === 'buy' ? (med - o.price) / med : (o.price - med) / med) : 0;
+    const need = usdtToAsset(state.settings.volume, state.filters.asset, state.filters.fiat) || 1;
+    const rep = o.merchant.completion * 0.6 + Math.min(1, o.merchant.orders / 3000) * 0.4;
+    const liq = Math.min(1, o.available / need);
+    return dev * 55 + rep * 28 + liq * 17 + (o.merchant.online ? 4 : 0) + (o.merchant.verified ? 3 : 0);
+  }
 
   function buildRow(o) {
     const ex = EX[o.exchange];
@@ -387,6 +398,7 @@ export function P2PScreen({ slot }) {
     refs.dev = h('div.pd');
     refs.avail = h('div.av');
     refs.limits = h('div.lm');
+    refs.best = h('span.of-best');     // метка лучшего стакана
 
     const el = h('button.offer', {
       dataset: { id: o.id },
@@ -399,7 +411,7 @@ export function P2PScreen({ slot }) {
       },
     },
       h('div.of-merchant',
-        h('div.of-name', h('span.ex-tag', ex?.tag || o.exchange), refs.name, refs.verified, refs.pro),
+        h('div.of-name', h('span.ex-tag', ex?.tag || o.exchange), refs.name, refs.verified, refs.pro, refs.best),
         h('div.of-sub', refs.onlineDot, refs.orders, h('span.sep', '·'), refs.completion, h('span.sep', '·'), refs.release, refs.kyc),
         refs.methods,
       ),
@@ -451,6 +463,17 @@ export function P2PScreen({ slot }) {
       mount(refs.methods, methodsKey ? o.methods.slice(0, 3).map((mid) => h('span.pm', PM[mid]?.name || mid)) : null);
     }
 
+    // метка лучших стаканов
+    const rank = bestRankMap.get(o.id);
+    const wantBest = rank === undefined ? '' : String(rank);
+    if (refs.best.dataset.r !== wantBest) {
+      refs.best.dataset.r = wantBest;
+      mount(refs.best, rank === 0 ? h('span.best-tag.top1', '★ Лучшая')
+        : rank !== undefined ? h('span.best-tag', 'ТОП') : null);
+    }
+    entry.el.classList.toggle('is-best', rank !== undefined);
+    entry.el.classList.toggle('is-best1', rank === 0);
+
     setHL(refs.price, fmtN(o.price, 2));
     setHL(refs.dev, `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`);
     refs.dev.style.color = favourable > 0 ? 'var(--buy)' : favourable < 0 ? 'var(--sell)' : 'var(--ink-4)';
@@ -486,6 +509,11 @@ export function P2PScreen({ slot }) {
   function renderBook(force = false) {
     const list = visibleOffers().slice(0, MAX_ROWS);
     bookCount.textContent = `Мерчант · ${list.length} оферов`;
+
+    // лучшие стаканы: топ-3 по качеству (цена + репутация + ликвидность)
+    bestRankMap = new Map(
+      [...list].sort((a, b) => quickScore(b) - quickScore(a)).slice(0, 3).map((o, i) => [o.id, i]),
+    );
 
     if (searchTerm) {
       const n = list.reduce((a, o) => a + (offerHay(o).includes(searchTerm) ? 1 : 0), 0);

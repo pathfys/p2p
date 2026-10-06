@@ -11,37 +11,29 @@ import { h, icon, mount } from '../core/dom.js';
 import { openSheet } from './sheet.js';
 import { toast } from './toast.js';
 import { haptic } from '../services/telegram.js';
-import { state, set } from '../core/store.js';
-import { fmtN } from '../core/format.js';
+import { state, set, addSpins, consumeSpin } from '../core/store.js';
 
-/** Зачислить выигрыш демо-слота на баланс/прокруты. */
+/** Зачислить выигрыш демо-слота на баланс/прокруты (прокруты зажаты потолком). */
 function creditPrize(slot) {
   const bonus = { s1: 1, s5: 5, s10: 10, s50: 50 }[slot.id];
   if (bonus) { set('balance', (b) => { b.usdt += bonus; }); return; }
-  if (slot.id === 'spin1') set('wheel', (w) => { w.spins += 1; });
-  if (slot.id === 'spin3') set('wheel', (w) => { w.spins += 3; });
+  if (slot.id === 'spin1') addSpins(1);
+  if (slot.id === 'spin3') addSpins(3);
   // fee / miss — без зачисления (демо)
 }
 
-/* Демо-слоты: label — что показываем, weight — относительный шанс,
-   tone — цвет сектора. Порядок = как на колесе по часовой стрелке. */
+/* Демо-слоты: у каждого свой цвет (c — заливка, c2 — для лёгкого градиента
+   внутри сектора), weight — относительный шанс. Порядок = по часовой стрелке. */
 export const WHEEL_SLOTS = [
-  { id: 's5',   label: '+5 USDT',   short: '+5',    weight: 20, tone: 'a' },
-  { id: 'spin1',label: 'Спин ×1',   short: '×1',    weight: 16, tone: 'b' },
-  { id: 'fee',  label: '−50% комиссия', short: '−50%', weight: 12, tone: 'a' },
-  { id: 's1',   label: '+1 USDT',   short: '+1',    weight: 24, tone: 'b' },
-  { id: 'miss', label: 'Мимо',      short: '—',     weight: 18, tone: 'c' },
-  { id: 's10',  label: '+10 USDT',  short: '+10',   weight: 10, tone: 'a' },
-  { id: 'spin3',label: 'Спин ×3',   short: '×3',    weight: 6,  tone: 'b' },
-  { id: 's50',  label: '+50 USDT',  short: '+50',   weight: 2,  tone: 'd' },
+  { id: 's5',   label: '+5 USDT',      short: '+5',   weight: 20, c: '#f7a600', c2: '#ffc24d' },
+  { id: 'spin1',label: 'Спин ×1',      short: '×1',   weight: 16, c: '#2ebd85', c2: '#53e0a6' },
+  { id: 'fee',  label: '−50% комиссия', short: '−50%', weight: 12, c: '#4a9bff', c2: '#7cb8ff' },
+  { id: 's1',   label: '+1 USDT',      short: '+1',   weight: 24, c: '#8b5cf6', c2: '#a981ff' },
+  { id: 'miss', label: 'Мимо',         short: '—',    weight: 18, c: '#3a4150', c2: '#4b5566' },
+  { id: 's10',  label: '+10 USDT',     short: '+10',  weight: 10, c: '#ec4899', c2: '#ff6fb3' },
+  { id: 'spin3',label: 'Спин ×3',      short: '×3',   weight: 6,  c: '#06b6d4', c2: '#3fd6ef' },
+  { id: 's50',  label: '+50 USDT',     short: '+50',  weight: 2,  c: '#ff5a3c', c2: '#ff8463' },
 ];
-
-const TONE = {
-  a: 'var(--acid)',
-  b: 'var(--buy)',
-  c: 'var(--panel-3)',
-  d: '#ff8a1e',
-};
 
 /** Взвешенный выбор индекса сектора. */
 function pickIndex() {
@@ -54,11 +46,18 @@ function pickIndex() {
   return WHEEL_SLOTS.length - 1;
 }
 
-/** conic-gradient из секторов. */
+/** conic-gradient из секторов, каждый своим цветом + тонкие разделители. */
 function wheelGradient() {
   const n = WHEEL_SLOTS.length;
   const step = 360 / n;
-  const stops = WHEEL_SLOTS.map((s, i) => `${TONE[s.tone]} ${i * step}deg ${(i + 1) * step}deg`);
+  const gap = 0.8;   // градусов на разделитель
+  const stops = [];
+  WHEEL_SLOTS.forEach((s, i) => {
+    const a0 = i * step;
+    const a1 = (i + 1) * step;
+    stops.push(`${s.c} ${a0 + gap}deg ${a1 - gap}deg`);
+    stops.push(`rgba(0,0,0,.35) ${a1 - gap}deg ${a1 + gap}deg`);
+  });
   return `conic-gradient(from -${step / 2}deg, ${stops.join(', ')})`;
 }
 
@@ -67,12 +66,13 @@ export function openWheelSheet() {
   const step = 360 / n;
   let angle = 0;          // накопленный угол поворота
   let spinning = false;
+  let lastSpinAt = 0;     // анти-дабл-клик
 
   const wheel = h('div.fw-wheel', { style: { background: wheelGradient() } },
     // подписи секторов (контейнер повёрнут к сектору, текст контр-вращением держим ровным)
     ...WHEEL_SLOTS.map((s, i) => h('div.fw-label', {
       style: { '--a': `${i * step}deg`, transform: `rotate(${i * step}deg)` },
-    }, h('span', s.short))),
+    }, h('span', { style: { color: s.id === 'miss' ? '#eaecef' : '#111' } }, s.short))),
     h('div.fw-hub', icon('zap')),
   );
 
@@ -90,9 +90,12 @@ export function openWheelSheet() {
   const resultEl = h('div.fw-result', { 'aria-live': 'polite' });
 
   function spin() {
-    if (spinning || state.wheel.spins <= 0) return;
+    // анти-абуз: блок повторного входа + атомарное списание прокрута
+    if (spinning) return;
+    if (Date.now() - lastSpinAt < 500) return;   // защита от дабл-клика
+    if (!consumeSpin()) { updateSpinBtn(); return; }
+    lastSpinAt = Date.now();
     spinning = true;
-    set('wheel', (w) => { w.spins -= 1; });   // списываем прокрут
     updateSpinBtn();
     mount(resultEl, '');
     haptic('medium');
@@ -142,7 +145,7 @@ export function openWheelSheet() {
       resultEl,
       h('div.fw-slots',
         WHEEL_SLOTS.map((s) => h('div.fw-slot',
-          h('i', { style: { background: TONE[s.tone] } }),
+          h('i', { style: { background: s.c } }),
           h('span.fw-slot-l', s.label),
         )),
       ),
