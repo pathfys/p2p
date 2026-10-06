@@ -7,6 +7,7 @@ import { openSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { haptic } from '../services/telegram.js';
 import { openDealSheet } from '../ui/dealSheet.js';
+import { openWheelSheet } from '../ui/wheel.js';
 import { DEAL_STATUS } from '../services/trade.js';
 import { navigate } from '../core/router.js';
 
@@ -42,6 +43,7 @@ export function HomeScreen() {
   root.append(
     wrap(kycSlot, 0),
     wrap(heroSlot, 1),
+    h('div', { style: { '--i': 2, marginTop: '12px' } }, promoBanner()),
     sectionTitle('Операции за сегодня', 2),
     wrap(tilesSlot, 3),
     sectionTitle('Баланс карточек', 4, h('button.btn.btn-xs.btn-ghost', { onClick: () => openCardSheet() }, icon('plus'), 'Карта')),
@@ -55,6 +57,14 @@ export function HomeScreen() {
 }
 
 const wrap = (node, i) => h('div', { style: { '--i': i } }, node);
+
+/** Промо-баннер: по тапу открывает колесо фортуны. */
+function promoBanner() {
+  return h('button.promo-banner', {
+    'aria-label': 'Колесо фортуны — прокрути бесплатно',
+    onClick: () => { haptic('light'); openWheelSheet(); },
+  }, h('img', { src: './assets/banners/wheel.webp', alt: 'Прокрути колесо фортуны бесплатно' }));
+}
 
 function sectionTitle(text, i, aside) {
   return h('div.section-title', { style: { '--i': i } }, h('span.eyebrow', text), h('i.rule'), aside || null);
