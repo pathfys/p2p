@@ -3,10 +3,11 @@ import { state, set, on } from './store.js';
 import { haptic } from '../services/telegram.js';
 
 const TABS = [
-  { id: 'home',     label: 'Главная',   icon: 'home',    title: 'P2P LIGHT',   sub: 'ai p2p terminal' },
-  { id: 'p2p',      label: 'P2P',       icon: 'layers',  title: 'СТАКАНЫ',   sub: 'live order books' },
-  { id: 'settings', label: 'Настройки', icon: 'sliders', title: 'НАСТРОЙКИ', sub: 'feed · trading · ai' },
-  { id: 'profile',  label: 'Профиль',   icon: 'user',    title: 'ПРОФИЛЬ',   sub: 'kyc · plan · security' },
+  { id: 'home',     label: 'Главная',   icon: 'home' },
+  { id: 'p2p',      label: 'P2P',       icon: 'layers' },
+  { id: 'top',      label: 'Топ',       icon: 'trophy' },
+  { id: 'settings', label: 'Настройки', icon: 'sliders' },
+  { id: 'profile',  label: 'Профиль',   icon: 'user' },
 ];
 
 const screens = new Map();
@@ -25,9 +26,6 @@ export function navigate(tabId, params = {}) {
   current = tabId;
   set('ui', (u) => { u.tab = tabId; });
 
-  const tab = TABS.find((t) => t.id === tabId);
-  qs('#screen-title').textContent = tab.title;
-  qs('#screen-sub').textContent = tab.sub;
   clear(qs('#topbar-slot'));
 
   const view = qs('#view');

@@ -9,6 +9,7 @@ import { startFeed } from './services/feed.js';
 import { log } from './services/logs.js';
 import { HomeScreen } from './screens/home.js';
 import { P2PScreen } from './screens/p2p.js';
+import { TopScreen } from './screens/top.js';
 import { SettingsScreen } from './screens/settings.js';
 import { ProfileScreen } from './screens/profile.js';
 import { closeTopSheet, sheetOpen } from './ui/sheet.js';
@@ -37,6 +38,7 @@ function boot() {
 
   register('home', HomeScreen);
   register('p2p', P2PScreen);
+  register('top', TopScreen);
   register('settings', SettingsScreen);
   register('profile', ProfileScreen);
 

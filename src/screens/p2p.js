@@ -6,7 +6,7 @@
  * не чаще REORDER_MS — иначе строка «уезжает» из-под пальца в момент тапа.
  */
 import { h, icon, mount, sparkline, clear } from '../core/dom.js';
-import { state, set, on, PAY_METHODS } from '../core/store.js';
+import { state, set, on, PAY_METHODS, canUseBestOffers } from '../core/store.js';
 import { fmtN, fmt0, compact, hhmmss } from '../core/format.js';
 import { EXCHANGES, EX, ASSETS, FIAT } from '../data/exchanges.js';
 import { regionChip, openRegionSheet } from '../ui/regionSheet.js';
@@ -18,6 +18,7 @@ import { openFilterSheet, activeFilterCount, SORTS } from '../ui/filterSheet.js'
 import { openSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { haptic } from '../services/telegram.js';
+import { navigate } from '../core/router.js';
 
 const PM = Object.fromEntries(PAY_METHODS.map((m) => [m.id, m]));
 const REORDER_MS = 1100;   // как часто разрешено менять порядок строк
@@ -404,6 +405,8 @@ export function P2PScreen({ slot }) {
       dataset: { id: o.id },
       style: { '--ex-c': ex?.tint || 'var(--panel-3)' },
       onClick: () => {
+        // лучшие стаканы открываются только на тарифе «3 месяца»
+        if (bestRankMap.has(o.id) && !canUseBestOffers()) { haptic('light'); openPlanGate(); return; }
         set('ui', (u) => { u.pickedOffer = o.id; });
         haptic('light');
         for (const [id, r] of rows) r.el.classList.toggle('is-picked', id === o.id);
@@ -463,16 +466,20 @@ export function P2PScreen({ slot }) {
       mount(refs.methods, methodsKey ? o.methods.slice(0, 3).map((mid) => h('span.pm', PM[mid]?.name || mid)) : null);
     }
 
-    // метка лучших стаканов
+    // метка лучших стаканов; заблокированы, если нет тарифа «3 месяца»
     const rank = bestRankMap.get(o.id);
-    const wantBest = rank === undefined ? '' : String(rank);
+    const locked = rank !== undefined && !canUseBestOffers();
+    const wantBest = rank === undefined ? '' : `${rank}${locked ? 'L' : ''}`;
     if (refs.best.dataset.r !== wantBest) {
       refs.best.dataset.r = wantBest;
-      mount(refs.best, rank === 0 ? h('span.best-tag.top1', '★ Лучшая')
-        : rank !== undefined ? h('span.best-tag', 'ТОП') : null);
+      mount(refs.best, rank === undefined ? null
+        : rank === 0
+          ? h('span.best-tag.top1', locked ? icon('lock', { sw: 2.4 }) : null, '★ Лучшая')
+          : h('span.best-tag', locked ? icon('lock', { sw: 2.4 }) : null, 'ТОП'));
     }
     entry.el.classList.toggle('is-best', rank !== undefined);
     entry.el.classList.toggle('is-best1', rank === 0);
+    entry.el.classList.toggle('is-locked', locked);
 
     setHL(refs.price, fmtN(o.price, 2));
     setHL(refs.dev, `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`);
@@ -695,6 +702,30 @@ export function P2PScreen({ slot }) {
     });
   }
 
+  /* ===================== gate: лучшие стаканы → тариф «3 месяца» ===================== */
+
+  function openPlanGate() {
+    const api = openSheet({
+      title: 'Лучшие стаканы',
+      subtitle: 'Тариф «3 месяца» · $200',
+      body: h('div',
+        h('div.gate-hero', icon('crown')),
+        h('p.gate-lead',
+          'Офферы с метками ', h('b', '★ Лучшая'), ' и ', h('b', 'ТОП'),
+          ' — это стаканы с лучшим сочетанием цены, репутации и ликвидности. Они открываются только на тарифе ', h('b', '«3 месяца» ($200)'), '.'),
+        h('div.panel.panel-flush', { style: { marginTop: '12px' } },
+          h('div.gate-row', icon('check', { class: 't-buy' }), 'Приоритетный доступ к топовым оферам'),
+          h('div.gate-row', icon('check', { class: 't-buy' }), 'Максимальная выгода на объёме закупки'),
+          h('div.gate-row', icon('check', { class: 't-buy' }), '90 дней полного доступа'),
+        ),
+      ),
+      foot: [
+        h('button.btn.btn-ghost', { onClick: () => api.close() }, 'Позже'),
+        h('button.btn.btn-primary', { onClick: () => { api.close(); navigate('profile'); } }, icon('crown'), 'Оформить тариф'),
+      ],
+    });
+  }
+
   /* ===================== search bar ===================== */
 
   function searchBar() {
@@ -744,6 +775,7 @@ export function P2PScreen({ slot }) {
   unsubs.push(on('market', () => { updateHead(); updateVolMeta(); }));
   unsubs.push(on('logs', (entry) => { if (entry) appendLog(entry); else renderLogs(); }));
   unsubs.push(on('kyc', () => renderBook(true)));
+  unsubs.push(on('profile', () => renderBook(true)));   // смена тарифа открывает/закрывает лучшие стаканы
 
   root.append(
     h('div', { style: { '--i': 0 } }, headSlot),

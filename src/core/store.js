@@ -35,11 +35,22 @@ export const KYC_LEVELS = [
   { level: 3, name: 'Корпоративный',    dayLimit: Infinity, monthLimit: Infinity, needs: ['personal', 'document', 'selfie', 'address', 'company'] },
 ];
 
+/**
+ * Подписки. Три платных срока + однодневный пробный период.
+ * Лучшие стаканы (метки «★ Лучшая» / «ТОП») открывает только тариф на 3 месяца.
+ */
 export const PLANS = [
-  { id: 'starter', name: 'Starter', price: 0,   seats: 1,  apiCalls: 5000,   exchanges: 3 },
-  { id: 'pro',     name: 'Pro',     price: 149, seats: 5,  apiCalls: 250000, exchanges: 8 },
-  { id: 'scale',   name: 'Scale',   price: 690, seats: 25, apiCalls: 5000000, exchanges: 8 },
+  { id: 'trial',   name: 'Пробный',  term: '1 день',   price: 0,   days: 1,  bestOffers: false,
+    perks: ['Полный доступ к стаканам на 24 часа', 'Один раз на аккаунт'] },
+  { id: 'week',    name: 'Неделя',   term: '7 дней',   price: 20,  days: 7,  bestOffers: false,
+    perks: ['Все биржи и регионы', 'AI-анализ контекста сделки', 'Фильтры и план исполнения'] },
+  { id: 'month',   name: 'Месяц',    term: '30 дней',  price: 100, days: 30, bestOffers: false,
+    perks: ['Всё из «Недели»', 'Приоритетный поток котировок', 'Экспорт логов и сделок'] },
+  { id: 'quarter', name: '3 месяца', term: '90 дней',  price: 200, days: 90, bestOffers: true,
+    perks: ['Всё из «Месяца»', 'Доступ к лучшим стаканам (★ Лучшая / ТОП)', 'Максимальная выгода на объёме'] },
 ];
+
+export const DAY_MS = 86400000;
 
 function defaults() {
   return {
@@ -127,11 +138,12 @@ function defaults() {
       handle: '@trader',
       tgId: null,
       photo: null,
-      plan: 'pro',
+      plan: null,              // активная подписка: null | trial | week | month | quarter
+      planSince: null,         // когда оформлена (timestamp)
+      planUntil: null,         // когда истекает (timestamp)
+      trialUsed: false,        // пробный период уже активировали
       apiToken: 'p2pd_live_' + Math.random().toString(36).slice(2, 12),
       twoFa: false,
-      seatsUsed: 1,
-      apiUsed: 0,
       joinedAt: Date.now(),
     },
 
@@ -247,7 +259,56 @@ export function importState(json) {
 /* ---------- derived helpers ---------- */
 
 export const kycInfo = () => KYC_LEVELS[state.kyc.level] || KYC_LEVELS[0];
-export const plan = () => PLANS.find((p) => p.id === state.profile.plan) || PLANS[0];
+
+/* ---------- подписки ---------- */
+
+/** Описание текущего (возможно истёкшего) тарифа или null, если подписки не было. */
+export const plan = () => PLANS.find((p) => p.id === state.profile.plan) || null;
+
+/** Подписка активна (есть тариф и он не истёк). */
+export function planActive() {
+  if (!state.profile.plan) return false;
+  const until = state.profile.planUntil;
+  return !until || Date.now() <= until;
+}
+
+/** Активный тариф (с учётом срока) или null. */
+export const activePlan = () => (planActive() ? plan() : null);
+
+/** Сколько миллисекунд осталось до конца подписки (0, если неактивна). */
+export function planRemainingMs() {
+  if (!planActive() || !state.profile.planUntil) return 0;
+  return Math.max(0, state.profile.planUntil - Date.now());
+}
+
+/** Доступны ли лучшие стаканы — только на активном тарифе «3 месяца». */
+export function canUseBestOffers() {
+  const p = activePlan();
+  return !!(p && p.bestOffers);
+}
+
+/** Можно ли ещё активировать пробный период. */
+export const trialAvailable = () => !state.profile.trialUsed;
+
+/** Оформить подписку по id тарифа. Возвращает false, если нельзя (например, повторный пробный). */
+export function subscribePlan(id) {
+  const p = PLANS.find((x) => x.id === id);
+  if (!p) return false;
+  if (p.id === 'trial' && state.profile.trialUsed) return false;
+  const now = Date.now();
+  set('profile', (pr) => {
+    pr.plan = p.id;
+    pr.planSince = now;
+    pr.planUntil = now + p.days * DAY_MS;
+    if (p.id === 'trial') pr.trialUsed = true;
+  });
+  return true;
+}
+
+/** Отменить подписку (сбросить активный тариф). */
+export function cancelPlan() {
+  set('profile', (pr) => { pr.plan = null; pr.planSince = null; pr.planUntil = null; });
+}
 
 export function canTrade() {
   if (state.kyc.status !== 'approved' || state.kyc.level < 1) {

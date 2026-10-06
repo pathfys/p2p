@@ -8,6 +8,16 @@ import { restartFeed } from '../services/feed.js';
 import { openSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
+// пояснения к весам факторов AI-модели
+const WEIGHT_DESC = {
+  reputation: 'Вес рейтинга мерчанта: доля успешных сделок и их количество.',
+  price: 'Вес отклонения цены офера от медианы рынка — чем выгоднее цена, тем выше балл.',
+  liquidity: 'Учитывает доступный объём и лимиты офера: проходит ли через него ваша закупка целиком.',
+  method: 'Штраф за рисковые реквизиты (кошельки, наличные) против надёжных банковских переводов.',
+  speed: 'Вес среднего времени, за которое мерчант отпускает актив.',
+  exchange: 'Надёжность площадки: аптайм и средняя задержка котировок.',
+};
+
 export function SettingsScreen() {
   const root = h('div.stagger');
   const unsubs = [];
@@ -26,7 +36,9 @@ export function SettingsScreen() {
     return h('div.switch-row', h('div.sr-main', h('div.sr-title', title), sub ? h('div.sr-sub', sub) : null), btn);
   };
 
-  const num = (label, key, { hint, min = 0, step = 'any', onAfter } = {}) => {
+  const setDesc = (t) => (t ? h('p.set-desc', t) : null);
+
+  const num = (label, key, { hint, min = 0, step = 'any', onAfter, desc } = {}) => {
     const input = h('input.input.num', {
       type: 'text', inputmode: 'decimal', value: String(state.settings[key]),
       onChange: (e) => {
@@ -36,10 +48,10 @@ export function SettingsScreen() {
         onAfter?.(n);
       },
     });
-    return h('label.field', h('span.label', label, hint ? h('span.hint', hint) : null), input);
+    return h('label.field', h('span.label', label, hint ? h('span.hint', hint) : null), input, setDesc(desc));
   };
 
-  const slider = (label, key, min, max, step, unit, onAfter) => {
+  const slider = (label, key, min, max, step, unit, desc, onAfter) => {
     const out = h('span.mono.t-sm.t-acid', `${state.settings[key]}${unit}`);
     const sl = h('input.slider', {
       type: 'range', min, max, step, value: state.settings[key],
@@ -52,7 +64,7 @@ export function SettingsScreen() {
         onAfter?.(v);
       },
     });
-    return h('div.field', h('span.label', label, h('span.hint', out)), sl);
+    return h('div.field', h('span.label', label, h('span.hint', out)), sl, setDesc(desc));
   };
 
   const title = (text, i, aside) => h('div.section-title', { style: { '--i': i } }, h('span.eyebrow', text), h('i.rule'), aside || null);
@@ -62,8 +74,10 @@ export function SettingsScreen() {
   const connection = h('div',
     h('div.panel.panel-body',
       h('div.grid-2',
-        num('Скорость обновления, мс', 'throttleMs', { hint: '120–3000', min: 120, onAfter: () => restartFeed() }),
-        num('Буфер логов', 'maxLogs', { hint: 'записей', min: 50 }),
+        num('Скорость обновления, мс', 'throttleMs', { hint: '120–3000', min: 120, onAfter: () => restartFeed(),
+          desc: 'Как часто перерисовывается стакан. Меньше — котировки живее и выше нагрузка; больше — лента спокойнее.' }),
+        num('Буфер логов', 'maxLogs', { hint: 'записей', min: 50,
+          desc: 'Сколько последних событий держать в памяти. Старые записи вытесняются новыми.' }),
       ),
     ),
     h('div.panel',
@@ -80,18 +94,25 @@ export function SettingsScreen() {
   const trading = h('div',
     h('div.panel.panel-body',
       h('div.grid-2',
-        num('Объём по умолч.', 'volume', { hint: 'USDT' }),
-        num('Лимит на сделку', 'maxPerDeal', { hint: 'USDT' }),
+        num('Объём по умолч.', 'volume', { hint: 'USDT',
+          desc: 'Сумма закупки, которая подставляется в стакан и калькулятор при открытии.' }),
+        num('Лимит на сделку', 'maxPerDeal', { hint: 'USDT',
+          desc: 'Потолок одной закупки — больше этого объёма за раз провести нельзя.' }),
       ),
-      num('Дневной лимит', 'dayLimit', { hint: 'USDT' }),
-      slider('Допустимый слиппедж', 'slippageTol', 0, 3, 0.05, '%'),
-      slider('Мин. спред для сигнала', 'minSpread', 0, 5, 0.1, '%'),
-      slider('Целевая маржа выхода', 'targetMargin', 0.1, 10, 0.1, '%'),
-      slider('Комиссия биржи', 'exchangeFee', 0, 1, 0.01, '%'),
+      num('Дневной лимит', 'dayLimit', { hint: 'USDT',
+        desc: 'Суммарный объём закупок в сутки. Работает вместе с лимитом вашего уровня KYC — применяется меньший из двух.' }),
+      slider('Допустимый слиппедж', 'slippageTol', 0, 3, 0.05, '%',
+        'Насколько цена исполнения по объёму может отклониться от лучшей в стакане. Если расчётный слиппедж выше порога — сделка помечается невыгодной.'),
+      slider('Мин. спред для сигнала', 'minSpread', 0, 5, 0.1, '%',
+        'Минимальный разрыв между медианой рынка и лучшей ценой, при котором есть смысл заходить. Ниже порога прибыль съедают комиссии.'),
+      slider('Целевая маржа выхода', 'targetMargin', 0.1, 10, 0.1, '%',
+        'Наценка, при которой планируется продать купленный актив. По ней считаются цена выхода и ожидаемая прибыль.'),
+      slider('Комиссия биржи', 'exchangeFee', 0, 1, 0.01, '%',
+        'Комиссия площадки, которая закладывается в эффективную цену и итоговую сумму списания.'),
     ),
     h('div.panel',
-      sw('Подтверждение сделок', 'Спрашивать перед отправкой ордера', 'confirmDeals'),
-      sw('Авто-отказ по риску', 'AI блокирует оферы с вердиктом «высокий риск»', 'autoRejectRisky'),
+      sw('Подтверждение сделок', 'Показывать финальное окно с суммой, ценой и мерчантом перед отправкой ордера — страховка от случайного тапа.', 'confirmDeals'),
+      sw('Авто-отказ по риску', 'Блокировать закупку у оферов с вердиктом AI «высокий риск», даже если остальные фильтры пройдены.', 'autoRejectRisky'),
     ),
   );
 
@@ -102,10 +123,12 @@ export function SettingsScreen() {
     const sum = Object.values(w).reduce((a, b) => a + b, 0);
     mount(aiSlot,
       h('div.panel.panel-body',
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' } },
           h('span.ai-badge', icon('cpu'), 'веса модели'),
           h('span.t-xs.t-muted.mono', { style: { marginLeft: 'auto' } }, `Σ ${sum}`),
         ),
+        h('p.set-desc', { style: { marginBottom: '12px' } },
+          'Из этих факторов складывается итоговый скор офера 0–100. Ползунок задаёт вклад каждого — чем он выше, тем сильнее фактор влияет на вердикт.'),
         Object.keys(w).map((k) => {
           const out = h('span.mono.t-sm.t-acid', String(w[k]));
           return h('div.field',
@@ -120,12 +143,14 @@ export function SettingsScreen() {
                 set('settings', (s) => { s.weights[k] = v; });
               },
             }),
+            h('p.set-desc', WEIGHT_DESC[k] || ''),
           );
         }),
-        slider('Мин. уверенность вердикта', 'minConfidence', 0, 100, 1, '%'),
+        slider('Мин. уверенность вердикта', 'minConfidence', 0, 100, 1, '%',
+          'Порог уверенности AI: вердикты ниже него показываются как «недостаточно данных» и не рекомендуются к исполнению.'),
       ),
       h('div.panel',
-        sw('AI-анализ контекста сделки', 'Вердикт, факторы риска и план исполнения', 'aiEnabled'),
+        sw('AI-анализ контекста сделки', 'Включает скоринг каждого офера: вердикт 0–100, взвешенные факторы, экономику сделки и план исполнения по объёму. При выключении подсказки пропадают.', 'aiEnabled'),
         h('button.row', {
           onClick: () => {
             set('settings', (s) => { s.weights = { reputation: 25, price: 25, liquidity: 15, method: 15, speed: 10, exchange: 10 }; });
@@ -207,10 +232,11 @@ export function SettingsScreen() {
   /* ---------- notifications ---------- */
 
   const notifications = h('div.panel',
-    sw('Алерты по спреду', `Сигнал, когда спред к медиане выше порога`, 'notifySpread'),
-    h('div.panel-body', slider('Порог спреда', 'notifySpreadPct', 0.2, 5, 0.1, '%')),
-    sw('Новые мерчанты', 'Уведомлять о появлении новых оферов в стакане', 'notifyNewMerchant'),
-    sw('Статусы сделок', 'Пуш при оплате, отпуске и завершении', 'notifyDealStatus'),
+    sw('Алерты по спреду', 'Присылать сигнал, когда разрыв между медианой рынка и лучшей ценой превышает заданный ниже порог.', 'notifySpread'),
+    h('div.panel-body', slider('Порог спреда', 'notifySpreadPct', 0.2, 5, 0.1, '%',
+      'Значение спреда к медиане, с которого ситуация в стакане считается выгодной и приходит алерт.')),
+    sw('Новые мерчанты', 'Уведомлять, когда в стакан по текущей паре и региону добавляется новый оффер.', 'notifyNewMerchant'),
+    sw('Статусы сделок', 'Пуш на каждом шаге сделки: оплата, отпуск актива, завершение или спор.', 'notifyDealStatus'),
   );
 
   /* ---------- appearance ---------- */
@@ -229,11 +255,12 @@ export function SettingsScreen() {
   );
 
   const appearance = h('div',
-    h('div.panel.panel-body', h('label.field', h('span.label', 'Тема'), themeSeg)),
+    h('div.panel.panel-body', h('label.field', h('span.label', 'Тема'), themeSeg,
+      h('p.set-desc', 'Светлая и тёмная схемы — обе в фирменной палитре Bybit. Применяется сразу ко всему интерфейсу.'))),
     h('div.panel',
-      sw('Компактные строки', 'Скрыть способы оплаты в стакане', 'compactRows'),
-      sw('Скрывать баланс при входе', 'Баланс по умолчанию замылен', 'hideBalanceDefault'),
-      sw('Виброотклик', 'Haptic feedback в Telegram', 'haptics'),
+      sw('Компактные строки', 'Убрать бейджи способов оплаты из строк стакана — в список помещается больше оферов.', 'compactRows'),
+      sw('Скрывать баланс при входе', 'При каждом запуске баланс кошелька скрыт (размыт), пока вы не тапнете по нему.', 'hideBalanceDefault'),
+      sw('Виброотклик', 'Короткая вибрация на тап и важные действия внутри Telegram. Вне Telegram ни на что не влияет.', 'haptics'),
     ),
   );
 

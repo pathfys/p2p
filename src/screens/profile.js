@@ -1,6 +1,6 @@
 /** Профиль — KYC-верификация, тариф B2B, безопасность, статистика. */
 import { h, icon, mount } from '../core/dom.js';
-import { state, set, on, KYC_LEVELS, PLANS, plan, kycInfo } from '../core/store.js';
+import { state, set, on, KYC_LEVELS, PLANS, plan, activePlan, planActive, planRemainingMs, trialAvailable, subscribePlan, cancelPlan, kycInfo, DAY_MS } from '../core/store.js';
 import { fmt0, fmtN, compact, dateTime, ago, mask } from '../core/format.js';
 import { openSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
@@ -31,7 +31,6 @@ export function ProfileScreen() {
 
   function renderHead() {
     const p = state.profile;
-    const pl = plan();
     const k = state.kyc;
     mount(headSlot,
       h('div.panel',
@@ -252,45 +251,114 @@ export function ProfileScreen() {
     });
   }
 
-  /* ---------------- plan (B2B) ---------------- */
+  /* ---------------- подписка ---------------- */
 
-  const pl = plan();
-  const planBlock = h('div',
-    h('div.plan',
-      h('div.plan-top',
-        h('span.plan-name', pl.name),
-        h('span.badge.badge-acid', icon('zap'), 'b2b saas'),
-        h('span.mono', { style: { marginLeft: 'auto', fontSize: '15px', fontWeight: '700' } }, pl.price ? `$${pl.price}/мес` : 'free'),
-      ),
-      h('div.usage',
-        usageRow('API-вызовы', state.profile.apiUsed, pl.apiCalls),
-        usageRow('Места в команде', state.profile.seatsUsed, pl.seats),
-        usageRow('Подключено бирж', state.filters.exchanges.length, pl.exchanges),
-      ),
-    ),
-    h('div.plan-grid', { style: { marginTop: '10px' } },
-      PLANS.map((p) => h('button.plan-card', {
-        class: p.id === state.profile.plan ? 'is-active' : '',
-        onClick: () => {
-          set('profile', (pr) => { pr.plan = p.id; });
-          toast('Тариф изменён', `${p.name} · ${p.seats} мест · ${compact(p.apiCalls)} вызовов`, 'ok');
-          navigateRefresh();
-        },
-      },
-        h('div.pn', p.name),
-        h('div.pp', p.price ? `$${p.price}` : '0'),
-        h('div.pu', `${p.seats} мест`),
-      )),
-    ),
-  );
+  const planSlot = h('div');
 
-  function usageRow(label, used, total) {
-    const pctv = total ? Math.min(100, (used / total) * 100) : 0;
-    return h('div.usage-row',
-      h('div.ur-top', h('span.l', label), h('span.v', `${compact(used)} / ${total === Infinity ? '∞' : compact(total)}`)),
-      h('div.meter', h('i', { class: pctv > 85 ? 'sell' : pctv > 60 ? 'warn' : '', style: { width: `${pctv}%` } })),
+  function fmtLeft(ms) {
+    if (ms <= 0) return 'истекла';
+    const d = Math.floor(ms / DAY_MS);
+    const hrs = Math.floor((ms % DAY_MS) / 3600000);
+    if (d >= 1) return `${d} дн · ${hrs} ч`;
+    const mins = Math.floor((ms % 3600000) / 60000);
+    return `${hrs} ч · ${mins} мин`;
+  }
+
+  function statusBanner() {
+    const ap = activePlan();
+    if (ap) {
+      const remaining = planRemainingMs();
+      const pct = ap.days ? Math.max(2, Math.min(100, (remaining / (ap.days * DAY_MS)) * 100)) : 0;
+      return h('div.sub-status.is-on',
+        h('div.sub-status-row',
+          h('div.deal-ico', icon('crown', { class: 't-acid' })),
+          h('div.row-main',
+            h('div.row-title', `Активна: ${ap.name}`,
+              ap.bestOffers ? h('span.badge.badge-acid', { style: { marginLeft: '6px' } }, icon('crown'), 'лучшие стаканы') : null),
+            h('div.row-sub', `Осталось ${fmtLeft(remaining)} · до ${dateTime(state.profile.planUntil)}`),
+          ),
+        ),
+        h('div.meter', { style: { marginTop: '10px' } }, h('i', { class: pct < 15 ? 'warn' : 'buy', style: { width: `${pct}%` } })),
+      );
+    }
+    const cur = plan();   // тариф был, но срок вышел
+    if (cur) {
+      return h('div.sub-status.is-off',
+        h('div.sub-status-row',
+          h('div.deal-ico', icon('clock', { class: 't-sell' })),
+          h('div.row-main',
+            h('div.row-title', `Подписка истекла: ${cur.name}`),
+            h('div.row-sub', 'Оформите тариф заново, чтобы вернуть доступ'),
+          ),
+        ),
+      );
+    }
+    return h('div.sub-status',
+      h('div.sub-status-row',
+        h('div.deal-ico', icon('lock', { class: 't-muted' })),
+        h('div.row-main',
+          h('div.row-title', 'Подписка не оформлена'),
+          h('div.row-sub', trialAvailable() ? 'Попробуйте 1 день бесплатно' : 'Выберите тариф ниже'),
+        ),
+      ),
     );
   }
+
+  function planCard(p) {
+    const ap = activePlan();
+    const isCurrent = !!ap && ap.id === p.id;
+    const isTrial = p.id === 'trial';
+    const trialBlocked = isTrial && !trialAvailable();
+    const btnLabel = isCurrent ? 'Текущий тариф'
+      : trialBlocked ? 'Пробный использован'
+      : isTrial ? 'Активировать пробный'
+      : 'Оформить';
+    return h('div.sub-card', { class: `${isCurrent ? 'is-current' : ''}${p.bestOffers ? ' is-top' : ''}` },
+      p.bestOffers ? h('div.sub-ribbon', 'лучшие стаканы') : null,
+      h('div.sub-card-head',
+        h('div', { style: { minWidth: '0' } },
+          h('div.sub-name', p.name, p.bestOffers ? icon('crown', { class: 'sub-crown' }) : null),
+          h('div.sub-term', p.term),
+        ),
+        h('div.sub-price',
+          p.price ? h('span.sub-amount', `$${p.price}`) : h('span.sub-amount', 'бесплатно'),
+          p.price ? h('span.sub-per', `/ ${p.term}`) : null,
+        ),
+      ),
+      h('ul.sub-perks', p.perks.map((perk) => h('li', icon('check', { class: 't-buy' }), h('span', perk)))),
+      h('button.btn.btn-block', {
+        class: isCurrent ? 'btn-ghost' : p.bestOffers ? 'btn-primary' : 'btn-soft',
+        disabled: isCurrent || trialBlocked,
+        onClick: () => {
+          if (subscribePlan(p.id)) {
+            toast('Подписка оформлена', `${p.name} · ${p.term}`, 'ok');
+            renderPlan();
+          } else {
+            toast('Недоступно', isTrial ? 'Пробный период уже использован' : 'Не удалось оформить', 'warn');
+          }
+        },
+      }, btnLabel),
+    );
+  }
+
+  function renderPlan() {
+    const ap = activePlan();
+    mount(planSlot,
+      statusBanner(),
+      ap ? h('button.btn.btn-ghost.btn-block', {
+        style: { marginTop: '8px' },
+        onClick: async () => {
+          if (await confirmSheet({ title: 'Отменить подписку?', message: `Тариф «${ap.name}» будет отключён, доступ к платным функциям закроется.`, confirmLabel: 'Отменить', danger: true })) {
+            cancelPlan(); renderPlan(); toast('Подписка отменена', null, 'warn');
+          }
+        },
+      }, 'Отменить подписку') : null,
+      h('div.sub-list', { style: { marginTop: '10px' } }, PLANS.map(planCard)),
+      h('div.note', { style: { marginTop: '10px' } }, icon('info'),
+        'Лучшие стаканы (метки «★ Лучшая» и «ТОП») доступны только на тарифе «3 месяца». На проде оплата проходит через платёжный провайдер; здесь подписка активируется локально для демонстрации.'),
+    );
+  }
+  renderPlan();
 
   /* ---------------- security ---------------- */
 
@@ -396,10 +464,8 @@ export function ProfileScreen() {
 
   function row(k, v) { return h('div.kv', h('dt', k), h('dd', v)); }
 
-  function navigateRefresh() { renderHead(); }
-
   unsubs.push(on('kyc', () => { renderKyc(); renderHead(); updateKycBadge(); renderStats(); }));
-  unsubs.push(on(['profile', 'stats'], () => { renderHead(); renderStats(); }));
+  unsubs.push(on(['profile', 'stats'], () => { renderHead(); renderStats(); renderPlan(); }));
 
   renderHead();
   renderKyc();
@@ -429,8 +495,8 @@ export function ProfileScreen() {
     h('div', { style: { '--i': 1 } }, regionSlot),
     title('KYC-верификация', 1, kycBadge),
     h('div', { style: { '--i': 2 } }, kycSlot),
-    title('Тариф', 3),
-    h('div', { style: { '--i': 4 } }, planBlock),
+    title('Подписка', 3),
+    h('div', { style: { '--i': 4 } }, planSlot),
     title('Безопасность', 5),
     h('div', { style: { '--i': 6 } }, security),
     title('Статистика', 7),

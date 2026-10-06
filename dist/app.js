@@ -122,11 +122,22 @@ const KYC_LEVELS = [
   { level: 3, name: 'Корпоративный',    dayLimit: Infinity, monthLimit: Infinity, needs: ['personal', 'document', 'selfie', 'address', 'company'] },
 ];
 
+/**
+ * Подписки. Три платных срока + однодневный пробный период.
+ * Лучшие стаканы (метки «★ Лучшая» / «ТОП») открывает только тариф на 3 месяца.
+ */
 const PLANS = [
-  { id: 'starter', name: 'Starter', price: 0,   seats: 1,  apiCalls: 5000,   exchanges: 3 },
-  { id: 'pro',     name: 'Pro',     price: 149, seats: 5,  apiCalls: 250000, exchanges: 8 },
-  { id: 'scale',   name: 'Scale',   price: 690, seats: 25, apiCalls: 5000000, exchanges: 8 },
+  { id: 'trial',   name: 'Пробный',  term: '1 день',   price: 0,   days: 1,  bestOffers: false,
+    perks: ['Полный доступ к стаканам на 24 часа', 'Один раз на аккаунт'] },
+  { id: 'week',    name: 'Неделя',   term: '7 дней',   price: 20,  days: 7,  bestOffers: false,
+    perks: ['Все биржи и регионы', 'AI-анализ контекста сделки', 'Фильтры и план исполнения'] },
+  { id: 'month',   name: 'Месяц',    term: '30 дней',  price: 100, days: 30, bestOffers: false,
+    perks: ['Всё из «Недели»', 'Приоритетный поток котировок', 'Экспорт логов и сделок'] },
+  { id: 'quarter', name: '3 месяца', term: '90 дней',  price: 200, days: 90, bestOffers: true,
+    perks: ['Всё из «Месяца»', 'Доступ к лучшим стаканам (★ Лучшая / ТОП)', 'Максимальная выгода на объёме'] },
 ];
+
+const DAY_MS = 86400000;
 
 function defaults() {
   return {
@@ -214,11 +225,12 @@ function defaults() {
       handle: '@trader',
       tgId: null,
       photo: null,
-      plan: 'pro',
+      plan: null,              // активная подписка: null | trial | week | month | quarter
+      planSince: null,         // когда оформлена (timestamp)
+      planUntil: null,         // когда истекает (timestamp)
+      trialUsed: false,        // пробный период уже активировали
       apiToken: 'p2pd_live_' + Math.random().toString(36).slice(2, 12),
       twoFa: false,
-      seatsUsed: 1,
-      apiUsed: 0,
       joinedAt: Date.now(),
     },
 
@@ -334,7 +346,56 @@ function importState(json) {
 /* ---------- derived helpers ---------- */
 
 const kycInfo = () => KYC_LEVELS[state.kyc.level] || KYC_LEVELS[0];
-const plan = () => PLANS.find((p) => p.id === state.profile.plan) || PLANS[0];
+
+/* ---------- подписки ---------- */
+
+/** Описание текущего (возможно истёкшего) тарифа или null, если подписки не было. */
+const plan = () => PLANS.find((p) => p.id === state.profile.plan) || null;
+
+/** Подписка активна (есть тариф и он не истёк). */
+function planActive() {
+  if (!state.profile.plan) return false;
+  const until = state.profile.planUntil;
+  return !until || Date.now() <= until;
+}
+
+/** Активный тариф (с учётом срока) или null. */
+const activePlan = () => (planActive() ? plan() : null);
+
+/** Сколько миллисекунд осталось до конца подписки (0, если неактивна). */
+function planRemainingMs() {
+  if (!planActive() || !state.profile.planUntil) return 0;
+  return Math.max(0, state.profile.planUntil - Date.now());
+}
+
+/** Доступны ли лучшие стаканы — только на активном тарифе «3 месяца». */
+function canUseBestOffers() {
+  const p = activePlan();
+  return !!(p && p.bestOffers);
+}
+
+/** Можно ли ещё активировать пробный период. */
+const trialAvailable = () => !state.profile.trialUsed;
+
+/** Оформить подписку по id тарифа. Возвращает false, если нельзя (например, повторный пробный). */
+function subscribePlan(id) {
+  const p = PLANS.find((x) => x.id === id);
+  if (!p) return false;
+  if (p.id === 'trial' && state.profile.trialUsed) return false;
+  const now = Date.now();
+  set('profile', (pr) => {
+    pr.plan = p.id;
+    pr.planSince = now;
+    pr.planUntil = now + p.days * DAY_MS;
+    if (p.id === 'trial') pr.trialUsed = true;
+  });
+  return true;
+}
+
+/** Отменить подписку (сбросить активный тариф). */
+function cancelPlan() {
+  set('profile', (pr) => { pr.plan = null; pr.planSince = null; pr.planUntil = null; });
+}
 
 function canTrade() {
   if (state.kyc.status !== 'approved' || state.kyc.level < 1) {
@@ -438,6 +499,11 @@ function trackDealForQuests(volumeUsdt) {
   __x.resetAll = resetAll;
   __x.exportState = exportState;
   __x.importState = importState;
+  __x.planActive = planActive;
+  __x.planRemainingMs = planRemainingMs;
+  __x.canUseBestOffers = canUseBestOffers;
+  __x.subscribePlan = subscribePlan;
+  __x.cancelPlan = cancelPlan;
   __x.canTrade = canTrade;
   __x.rollDay = rollDay;
   __x.setRegion = setRegion;
@@ -451,9 +517,12 @@ function trackDealForQuests(volumeUsdt) {
   __x.PAY_METHODS = PAY_METHODS;
   __x.KYC_LEVELS = KYC_LEVELS;
   __x.PLANS = PLANS;
+  __x.DAY_MS = DAY_MS;
   __x.state = state;
   __x.kycInfo = kycInfo;
   __x.plan = plan;
+  __x.activePlan = activePlan;
+  __x.trialAvailable = trialAvailable;
   __x.QUESTS = QUESTS;
   __x.MAX_SPINS = MAX_SPINS;
 };
@@ -553,6 +622,10 @@ const ICONS = {
   target: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0-3.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z',
   bookmark: 'M6 3h12v18l-6-4.5L6 21V3Z',
   scale: 'M12 4v16M7 20h10M12 7 5 9l3.5 5L12 9l3.5 5L19 9l-7-2Z',
+  trophy: 'M7 4h10v4a5 5 0 0 1-10 0V4ZM7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3M9 15h6M12 13v4M8 20h8',
+  lock: 'M6 10V8a6 6 0 0 1 12 0v2M5 10h14v10H5zM12 14v3',
+  crown: 'M4 18h16M4 18l-1.5-9 5 4L12 6l4.5 7 5-4L20 18',
+  medal: 'M8 3h8l-2 6H10L8 3ZM12 9a6 6 0 1 0 0 12 6 6 0 0 0 0-12Zm0 4v4',
   activity: 'M3 12h4l3-7 4 14 3-7h4',
   search: 'M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM21 21l-5.2-5.2',
 };
@@ -679,10 +752,11 @@ const { h, icon, qs, mount, clear } = __req("src/core/dom.js");
 const { state, set, on } = __req("src/core/store.js");
 const { haptic } = __req("src/services/telegram.js");
 const TABS = [
-  { id: 'home',     label: 'Главная',   icon: 'home',    title: 'P2P LIGHT',   sub: 'ai p2p terminal' },
-  { id: 'p2p',      label: 'P2P',       icon: 'layers',  title: 'СТАКАНЫ',   sub: 'live order books' },
-  { id: 'settings', label: 'Настройки', icon: 'sliders', title: 'НАСТРОЙКИ', sub: 'feed · trading · ai' },
-  { id: 'profile',  label: 'Профиль',   icon: 'user',    title: 'ПРОФИЛЬ',   sub: 'kyc · plan · security' },
+  { id: 'home',     label: 'Главная',   icon: 'home' },
+  { id: 'p2p',      label: 'P2P',       icon: 'layers' },
+  { id: 'top',      label: 'Топ',       icon: 'trophy' },
+  { id: 'settings', label: 'Настройки', icon: 'sliders' },
+  { id: 'profile',  label: 'Профиль',   icon: 'user' },
 ];
 
 const screens = new Map();
@@ -701,9 +775,6 @@ function navigate(tabId, params = {}) {
   current = tabId;
   set('ui', (u) => { u.tab = tabId; });
 
-  const tab = TABS.find((t) => t.id === tabId);
-  qs('#screen-title').textContent = tab.title;
-  qs('#screen-sub').textContent = tab.sub;
   clear(qs('#topbar-slot'));
 
   const view = qs('#view');
@@ -2831,7 +2902,6 @@ function hero() {
     h('div.hero-top',
       h('span.eyebrow', 'Баланс кошелька'),
       b.locked > 0 ? h('span.badge.badge-warn', icon('clock'), `эскроу ${fmt0(b.locked)}`) : null,
-      h('span.badge.badge-acid', icon('cpu'), 'ai on'),
     ),
     h('button.balance-tap', {
       'aria-label': hidden ? 'Показать баланс' : 'Скрыть баланс',
@@ -3675,7 +3745,7 @@ __m["src/screens/p2p.js"] = function (__x, __req) {
  * не чаще REORDER_MS — иначе строка «уезжает» из-под пальца в момент тапа.
  */
 const { h, icon, mount, sparkline, clear } = __req("src/core/dom.js");
-const { state, set, on, PAY_METHODS } = __req("src/core/store.js");
+const { state, set, on, PAY_METHODS, canUseBestOffers } = __req("src/core/store.js");
 const { fmtN, fmt0, compact, hhmmss } = __req("src/core/format.js");
 const { EXCHANGES, EX, ASSETS, FIAT } = __req("src/data/exchanges.js");
 const { regionChip, openRegionSheet } = __req("src/ui/regionSheet.js");
@@ -3687,6 +3757,7 @@ const { openFilterSheet, activeFilterCount, SORTS } = __req("src/ui/filterSheet.
 const { openSheet } = __req("src/ui/sheet.js");
 const { toast } = __req("src/ui/toast.js");
 const { haptic } = __req("src/services/telegram.js");
+const { navigate } = __req("src/core/router.js");
 const PM = Object.fromEntries(PAY_METHODS.map((m) => [m.id, m]));
 const REORDER_MS = 1100;   // как часто разрешено менять порядок строк
 const MAX_ROWS = 60;
@@ -4072,6 +4143,8 @@ function P2PScreen({ slot }) {
       dataset: { id: o.id },
       style: { '--ex-c': ex?.tint || 'var(--panel-3)' },
       onClick: () => {
+        // лучшие стаканы открываются только на тарифе «3 месяца»
+        if (bestRankMap.has(o.id) && !canUseBestOffers()) { haptic('light'); openPlanGate(); return; }
         set('ui', (u) => { u.pickedOffer = o.id; });
         haptic('light');
         for (const [id, r] of rows) r.el.classList.toggle('is-picked', id === o.id);
@@ -4131,16 +4204,20 @@ function P2PScreen({ slot }) {
       mount(refs.methods, methodsKey ? o.methods.slice(0, 3).map((mid) => h('span.pm', PM[mid]?.name || mid)) : null);
     }
 
-    // метка лучших стаканов
+    // метка лучших стаканов; заблокированы, если нет тарифа «3 месяца»
     const rank = bestRankMap.get(o.id);
-    const wantBest = rank === undefined ? '' : String(rank);
+    const locked = rank !== undefined && !canUseBestOffers();
+    const wantBest = rank === undefined ? '' : `${rank}${locked ? 'L' : ''}`;
     if (refs.best.dataset.r !== wantBest) {
       refs.best.dataset.r = wantBest;
-      mount(refs.best, rank === 0 ? h('span.best-tag.top1', '★ Лучшая')
-        : rank !== undefined ? h('span.best-tag', 'ТОП') : null);
+      mount(refs.best, rank === undefined ? null
+        : rank === 0
+          ? h('span.best-tag.top1', locked ? icon('lock', { sw: 2.4 }) : null, '★ Лучшая')
+          : h('span.best-tag', locked ? icon('lock', { sw: 2.4 }) : null, 'ТОП'));
     }
     entry.el.classList.toggle('is-best', rank !== undefined);
     entry.el.classList.toggle('is-best1', rank === 0);
+    entry.el.classList.toggle('is-locked', locked);
 
     setHL(refs.price, fmtN(o.price, 2));
     setHL(refs.dev, `${dev > 0 ? '+' : ''}${dev.toFixed(2)}%`);
@@ -4363,6 +4440,30 @@ function P2PScreen({ slot }) {
     });
   }
 
+  /* ===================== gate: лучшие стаканы → тариф «3 месяца» ===================== */
+
+  function openPlanGate() {
+    const api = openSheet({
+      title: 'Лучшие стаканы',
+      subtitle: 'Тариф «3 месяца» · $200',
+      body: h('div',
+        h('div.gate-hero', icon('crown')),
+        h('p.gate-lead',
+          'Офферы с метками ', h('b', '★ Лучшая'), ' и ', h('b', 'ТОП'),
+          ' — это стаканы с лучшим сочетанием цены, репутации и ликвидности. Они открываются только на тарифе ', h('b', '«3 месяца» ($200)'), '.'),
+        h('div.panel.panel-flush', { style: { marginTop: '12px' } },
+          h('div.gate-row', icon('check', { class: 't-buy' }), 'Приоритетный доступ к топовым оферам'),
+          h('div.gate-row', icon('check', { class: 't-buy' }), 'Максимальная выгода на объёме закупки'),
+          h('div.gate-row', icon('check', { class: 't-buy' }), '90 дней полного доступа'),
+        ),
+      ),
+      foot: [
+        h('button.btn.btn-ghost', { onClick: () => api.close() }, 'Позже'),
+        h('button.btn.btn-primary', { onClick: () => { api.close(); navigate('profile'); } }, icon('crown'), 'Оформить тариф'),
+      ],
+    });
+  }
+
   /* ===================== search bar ===================== */
 
   function searchBar() {
@@ -4412,6 +4513,7 @@ function P2PScreen({ slot }) {
   unsubs.push(on('market', () => { updateHead(); updateVolMeta(); }));
   unsubs.push(on('logs', (entry) => { if (entry) appendLog(entry); else renderLogs(); }));
   unsubs.push(on('kyc', () => renderBook(true)));
+  unsubs.push(on('profile', () => renderBook(true)));   // смена тарифа открывает/закрывает лучшие стаканы
 
   root.append(
     h('div', { style: { '--i': 0 } }, headSlot),
@@ -4449,6 +4551,210 @@ function P2PScreen({ slot }) {
   __x.P2PScreen = P2PScreen;
 };
 
+__m["src/screens/top.js"] = function (__x, __req) {
+/**
+ * Топ — рейтинг мерчантов за неделю / месяц / всё время.
+ * Тип топа выбирается фильтром: по объёму USDT или по числу ордеров.
+ *
+ * Бэкенда нет, поэтому таблица лидеров собирается детерминированным
+ * генератором (seeded PRNG): состав и цифры стабильны между перерисовками,
+ * но меняются от периода к периоду — ровно как отдавал бы сервер.
+ */
+const { h, icon, mount } = __req("src/core/dom.js");
+const { fmt0, compact } = __req("src/core/format.js");
+const { EXCHANGES, EX } = __req("src/data/exchanges.js");
+const { haptic } = __req("src/services/telegram.js");
+const PERIODS = [
+  { id: 'week',  label: 'Неделя',    mult: 1 },
+  { id: 'month', label: 'Месяц',     mult: 4.3 },
+  { id: 'all',   label: 'Всё время', mult: 64 },
+];
+
+const METRICS = [
+  { id: 'volume', label: 'По объёму USDT' },
+  { id: 'orders', label: 'По ордерам' },
+];
+
+const NAMES = [
+  'CryptoBaron', 'AlphaDesk', 'FastSwap', 'UsdtKing', 'NordExchange', 'MerchantPro',
+  'LiquidHub', 'SafeTrade', 'OtcWhale', 'PrimeP2P', 'GoldBridge', 'FlashDealer',
+  'VostokPay', 'SilkRoad', 'EuroDesk', 'AsiaLiquid', 'TetherLord', 'QuickFiat',
+  'IronVault', 'StableFlow', 'RapidCash', 'MetroSwap', 'OceanOtc', 'VertexPay',
+  'ZenTrader', 'NovaDesk', 'ApexFiat', 'LunarSwap', 'TitanOtc', 'OrbitPay',
+  'CobraDeals', 'FalconFx', 'MeridianP2P', 'HelixSwap', 'CedarTrade', 'AtlasDesk',
+  'PulseFiat', 'VektorPay', 'DeltaWhale', 'KometaOtc',
+];
+
+/* ---- детерминированный PRNG ---- */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s) {
+  let x = 2166136261;
+  for (let i = 0; i < s.length; i++) { x ^= s.charCodeAt(i); x = Math.imul(x, 16777619); }
+  return x >>> 0;
+}
+
+/** Базовый профиль мерчанта — стабилен на всё время жизни экрана. */
+function buildRoster() {
+  return NAMES.map((name) => {
+    const r = mulberry32(hashStr(name));
+    const ex = EXCHANGES[Math.floor(r() * EXCHANGES.length)].id;
+    const baseWeekVol = 40_000 + r() * 2_400_000;     // недельный объём, USDT
+    const avgTicket = 280 + r() * 4200;               // средний чек, USDT/ордер
+    const completion = 0.93 + r() * 0.069;
+    const rating = 4.6 + r() * 0.39;
+    const verified = r() > 0.22;
+    const pro = r() > 0.6;
+    return { name, ex, baseWeekVol, avgTicket, completion, rating, verified, pro };
+  });
+}
+
+/** Значения за выбранный период (с детерминированным джиттером → топ меняется). */
+function entriesFor(roster, periodId) {
+  const period = PERIODS.find((p) => p.id === periodId) || PERIODS[0];
+  return roster.map((m) => {
+    const j = mulberry32(hashStr(m.name + ':' + periodId))();
+    const jitter = 0.72 + j * 0.56;                   // 0.72..1.28
+    const volume = m.baseWeekVol * period.mult * jitter;
+    const orders = Math.max(1, Math.round(volume / m.avgTicket));
+    return { ...m, volume, orders };
+  });
+}
+
+function TopScreen({ slot }) {
+  const root = h('div.stagger');
+
+  const roster = buildRoster();
+  let periodId = 'week';
+  let metricId = 'volume';
+
+  /* topbar: что сейчас показываем */
+  const slotBadge = h('span.badge', 'рейтинг');
+  slot.append(slotBadge);
+
+  const listSlot = h('div');
+  const podiumSlot = h('div');
+
+  const periodSeg = h('div.seg',
+    PERIODS.map((p) => h('button', {
+      'aria-pressed': String(p.id === periodId),
+      onClick: (e) => {
+        if (p.id === periodId) return;
+        periodId = p.id; haptic('select');
+        for (const b of e.currentTarget.parentNode.children) b.setAttribute('aria-pressed', 'false');
+        e.currentTarget.setAttribute('aria-pressed', 'true');
+        render();
+      },
+    }, p.label)),
+  );
+
+  const metricSeg = h('div.seg',
+    METRICS.map((m) => h('button', {
+      'aria-pressed': String(m.id === metricId),
+      onClick: (e) => {
+        if (m.id === metricId) return;
+        metricId = m.id; haptic('select');
+        for (const b of e.currentTarget.parentNode.children) b.setAttribute('aria-pressed', 'false');
+        e.currentTarget.setAttribute('aria-pressed', 'true');
+        render();
+      },
+    }, m.label)),
+  );
+
+  const metricVal = (e) => (metricId === 'volume' ? `${compact(e.volume)}` : `${fmt0(e.orders)}`);
+  const metricUnit = () => (metricId === 'volume' ? 'USDT' : 'ордеров');
+  const secondVal = (e) => (metricId === 'volume' ? `${fmt0(e.orders)} ордеров` : `${compact(e.volume)} USDT`);
+
+  function avatar(e, size = 34) {
+    const ex = EX[e.ex];
+    return h('div.lb-ava', { style: { width: `${size}px`, height: `${size}px`, background: ex?.tint || 'var(--acid)' } }, (e.name[0] || '?'));
+  }
+
+  function podium(entries) {
+    // порядок колонок: 2-е, 1-е, 3-е место (1-е по центру и выше)
+    const order = [entries[1], entries[0], entries[2]].filter(Boolean);
+    const rankOf = (e) => entries.indexOf(e) + 1;
+    return h('div.podium',
+      order.map((e) => {
+        const rank = rankOf(e);
+        return h('div.pod-col', { class: `r${rank}` },
+          h('div.pod-medal', icon(rank === 1 ? 'crown' : 'medal')),
+          avatar(e, rank === 1 ? 52 : 44),
+          h('div.pod-name', e.name),
+          h('div.pod-ex', EX[e.ex]?.name || e.ex),
+          h('div.pod-val', metricVal(e), h('span.pod-unit', metricUnit())),
+          h('div.pod-bar'),
+          h('div.pod-rank', `#${rank}`),
+        );
+      }),
+    );
+  }
+
+  function row(e, rank) {
+    return h('button.lb-row', {
+      onClick: () => haptic('light'),
+    },
+      h('div.lb-rank', String(rank)),
+      avatar(e),
+      h('div.lb-main',
+        h('div.lb-name', e.name,
+          e.verified ? icon('shieldCheck', { class: 'of-verified' }) : null,
+          e.pro ? h('span.badge.badge-acid', { style: { height: '15px', fontSize: '8.5px' } }, 'pro') : null,
+        ),
+        h('div.lb-sub',
+          h('span.ex-tag', { style: { '--ex-c': EX[e.ex]?.tint } }, EX[e.ex]?.tag || e.ex),
+          h('span', `${(e.completion * 100).toFixed(1)}%`),
+          h('span.sep', '·'),
+          h('span', `★${e.rating.toFixed(2)}`),
+        ),
+      ),
+      h('div.lb-val',
+        h('div.lb-v', metricVal(e), h('span.lb-u', metricUnit())),
+        h('div.lb-v2', secondVal(e)),
+      ),
+    );
+  }
+
+  function render() {
+    const entries = entriesFor(roster, periodId)
+      .sort((a, b) => (metricId === 'volume' ? b.volume - a.volume : b.orders - a.orders));
+
+    const top3 = entries.slice(0, 3);
+    const rest = entries.slice(3, 30);
+
+    mount(podiumSlot, podium(top3));
+    mount(listSlot, h('div.panel.panel-flush', rest.map((e, i) => row(e, i + 4))));
+  }
+
+  render();
+
+  root.append(
+    h('div.section-title', { style: { '--i': 0 } }, h('span.eyebrow', 'Рейтинг мерчантов'), h('i.rule')),
+    h('div.panel.panel-body', { style: { '--i': 1 } },
+      h('span.label', { style: { display: 'block', marginBottom: '8px' } }, 'Период'),
+      periodSeg,
+      h('span.label', { style: { display: 'block', margin: '12px 0 8px' } }, 'Тип топа'),
+      metricSeg,
+      h('p.set-desc', 'Лидеры площадок P2P по обороту. Переключите период и тип рейтинга — по суммарному объёму в USDT или по числу закрытых ордеров.'),
+    ),
+    h('div', { style: { '--i': 2, marginTop: '12px' } }, podiumSlot),
+    h('div.section-title', { style: { '--i': 3 } }, h('span.eyebrow', 'Остальные места'), h('i.rule')),
+    h('div', { style: { '--i': 4 } }, listSlot),
+    h('div.foot-note', 'Рейтинг обновляется агрегатором по закрытым сделкам. Период и тип топа задаются фильтрами выше.'),
+  );
+
+  return { node: root };
+}
+
+  __x.TopScreen = TopScreen;
+};
+
 __m["src/screens/settings.js"] = function (__x, __req) {
 /** Настройки — соединение, трейдинг, AI, биржи, уведомления, внешний вид, данные. */
 const { h, icon, mount } = __req("src/core/dom.js");
@@ -4459,6 +4765,16 @@ const { WEIGHT_LABELS } = __req("src/services/analysis.js");
 const { restartFeed } = __req("src/services/feed.js");
 const { openSheet, confirmSheet } = __req("src/ui/sheet.js");
 const { toast } = __req("src/ui/toast.js");
+// пояснения к весам факторов AI-модели
+const WEIGHT_DESC = {
+  reputation: 'Вес рейтинга мерчанта: доля успешных сделок и их количество.',
+  price: 'Вес отклонения цены офера от медианы рынка — чем выгоднее цена, тем выше балл.',
+  liquidity: 'Учитывает доступный объём и лимиты офера: проходит ли через него ваша закупка целиком.',
+  method: 'Штраф за рисковые реквизиты (кошельки, наличные) против надёжных банковских переводов.',
+  speed: 'Вес среднего времени, за которое мерчант отпускает актив.',
+  exchange: 'Надёжность площадки: аптайм и средняя задержка котировок.',
+};
+
 function SettingsScreen() {
   const root = h('div.stagger');
   const unsubs = [];
@@ -4477,7 +4793,9 @@ function SettingsScreen() {
     return h('div.switch-row', h('div.sr-main', h('div.sr-title', title), sub ? h('div.sr-sub', sub) : null), btn);
   };
 
-  const num = (label, key, { hint, min = 0, step = 'any', onAfter } = {}) => {
+  const setDesc = (t) => (t ? h('p.set-desc', t) : null);
+
+  const num = (label, key, { hint, min = 0, step = 'any', onAfter, desc } = {}) => {
     const input = h('input.input.num', {
       type: 'text', inputmode: 'decimal', value: String(state.settings[key]),
       onChange: (e) => {
@@ -4487,10 +4805,10 @@ function SettingsScreen() {
         onAfter?.(n);
       },
     });
-    return h('label.field', h('span.label', label, hint ? h('span.hint', hint) : null), input);
+    return h('label.field', h('span.label', label, hint ? h('span.hint', hint) : null), input, setDesc(desc));
   };
 
-  const slider = (label, key, min, max, step, unit, onAfter) => {
+  const slider = (label, key, min, max, step, unit, desc, onAfter) => {
     const out = h('span.mono.t-sm.t-acid', `${state.settings[key]}${unit}`);
     const sl = h('input.slider', {
       type: 'range', min, max, step, value: state.settings[key],
@@ -4503,7 +4821,7 @@ function SettingsScreen() {
         onAfter?.(v);
       },
     });
-    return h('div.field', h('span.label', label, h('span.hint', out)), sl);
+    return h('div.field', h('span.label', label, h('span.hint', out)), sl, setDesc(desc));
   };
 
   const title = (text, i, aside) => h('div.section-title', { style: { '--i': i } }, h('span.eyebrow', text), h('i.rule'), aside || null);
@@ -4513,8 +4831,10 @@ function SettingsScreen() {
   const connection = h('div',
     h('div.panel.panel-body',
       h('div.grid-2',
-        num('Скорость обновления, мс', 'throttleMs', { hint: '120–3000', min: 120, onAfter: () => restartFeed() }),
-        num('Буфер логов', 'maxLogs', { hint: 'записей', min: 50 }),
+        num('Скорость обновления, мс', 'throttleMs', { hint: '120–3000', min: 120, onAfter: () => restartFeed(),
+          desc: 'Как часто перерисовывается стакан. Меньше — котировки живее и выше нагрузка; больше — лента спокойнее.' }),
+        num('Буфер логов', 'maxLogs', { hint: 'записей', min: 50,
+          desc: 'Сколько последних событий держать в памяти. Старые записи вытесняются новыми.' }),
       ),
     ),
     h('div.panel',
@@ -4531,18 +4851,25 @@ function SettingsScreen() {
   const trading = h('div',
     h('div.panel.panel-body',
       h('div.grid-2',
-        num('Объём по умолч.', 'volume', { hint: 'USDT' }),
-        num('Лимит на сделку', 'maxPerDeal', { hint: 'USDT' }),
+        num('Объём по умолч.', 'volume', { hint: 'USDT',
+          desc: 'Сумма закупки, которая подставляется в стакан и калькулятор при открытии.' }),
+        num('Лимит на сделку', 'maxPerDeal', { hint: 'USDT',
+          desc: 'Потолок одной закупки — больше этого объёма за раз провести нельзя.' }),
       ),
-      num('Дневной лимит', 'dayLimit', { hint: 'USDT' }),
-      slider('Допустимый слиппедж', 'slippageTol', 0, 3, 0.05, '%'),
-      slider('Мин. спред для сигнала', 'minSpread', 0, 5, 0.1, '%'),
-      slider('Целевая маржа выхода', 'targetMargin', 0.1, 10, 0.1, '%'),
-      slider('Комиссия биржи', 'exchangeFee', 0, 1, 0.01, '%'),
+      num('Дневной лимит', 'dayLimit', { hint: 'USDT',
+        desc: 'Суммарный объём закупок в сутки. Работает вместе с лимитом вашего уровня KYC — применяется меньший из двух.' }),
+      slider('Допустимый слиппедж', 'slippageTol', 0, 3, 0.05, '%',
+        'Насколько цена исполнения по объёму может отклониться от лучшей в стакане. Если расчётный слиппедж выше порога — сделка помечается невыгодной.'),
+      slider('Мин. спред для сигнала', 'minSpread', 0, 5, 0.1, '%',
+        'Минимальный разрыв между медианой рынка и лучшей ценой, при котором есть смысл заходить. Ниже порога прибыль съедают комиссии.'),
+      slider('Целевая маржа выхода', 'targetMargin', 0.1, 10, 0.1, '%',
+        'Наценка, при которой планируется продать купленный актив. По ней считаются цена выхода и ожидаемая прибыль.'),
+      slider('Комиссия биржи', 'exchangeFee', 0, 1, 0.01, '%',
+        'Комиссия площадки, которая закладывается в эффективную цену и итоговую сумму списания.'),
     ),
     h('div.panel',
-      sw('Подтверждение сделок', 'Спрашивать перед отправкой ордера', 'confirmDeals'),
-      sw('Авто-отказ по риску', 'AI блокирует оферы с вердиктом «высокий риск»', 'autoRejectRisky'),
+      sw('Подтверждение сделок', 'Показывать финальное окно с суммой, ценой и мерчантом перед отправкой ордера — страховка от случайного тапа.', 'confirmDeals'),
+      sw('Авто-отказ по риску', 'Блокировать закупку у оферов с вердиктом AI «высокий риск», даже если остальные фильтры пройдены.', 'autoRejectRisky'),
     ),
   );
 
@@ -4553,10 +4880,12 @@ function SettingsScreen() {
     const sum = Object.values(w).reduce((a, b) => a + b, 0);
     mount(aiSlot,
       h('div.panel.panel-body',
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' } },
           h('span.ai-badge', icon('cpu'), 'веса модели'),
           h('span.t-xs.t-muted.mono', { style: { marginLeft: 'auto' } }, `Σ ${sum}`),
         ),
+        h('p.set-desc', { style: { marginBottom: '12px' } },
+          'Из этих факторов складывается итоговый скор офера 0–100. Ползунок задаёт вклад каждого — чем он выше, тем сильнее фактор влияет на вердикт.'),
         Object.keys(w).map((k) => {
           const out = h('span.mono.t-sm.t-acid', String(w[k]));
           return h('div.field',
@@ -4571,12 +4900,14 @@ function SettingsScreen() {
                 set('settings', (s) => { s.weights[k] = v; });
               },
             }),
+            h('p.set-desc', WEIGHT_DESC[k] || ''),
           );
         }),
-        slider('Мин. уверенность вердикта', 'minConfidence', 0, 100, 1, '%'),
+        slider('Мин. уверенность вердикта', 'minConfidence', 0, 100, 1, '%',
+          'Порог уверенности AI: вердикты ниже него показываются как «недостаточно данных» и не рекомендуются к исполнению.'),
       ),
       h('div.panel',
-        sw('AI-анализ контекста сделки', 'Вердикт, факторы риска и план исполнения', 'aiEnabled'),
+        sw('AI-анализ контекста сделки', 'Включает скоринг каждого офера: вердикт 0–100, взвешенные факторы, экономику сделки и план исполнения по объёму. При выключении подсказки пропадают.', 'aiEnabled'),
         h('button.row', {
           onClick: () => {
             set('settings', (s) => { s.weights = { reputation: 25, price: 25, liquidity: 15, method: 15, speed: 10, exchange: 10 }; });
@@ -4658,10 +4989,11 @@ function SettingsScreen() {
   /* ---------- notifications ---------- */
 
   const notifications = h('div.panel',
-    sw('Алерты по спреду', `Сигнал, когда спред к медиане выше порога`, 'notifySpread'),
-    h('div.panel-body', slider('Порог спреда', 'notifySpreadPct', 0.2, 5, 0.1, '%')),
-    sw('Новые мерчанты', 'Уведомлять о появлении новых оферов в стакане', 'notifyNewMerchant'),
-    sw('Статусы сделок', 'Пуш при оплате, отпуске и завершении', 'notifyDealStatus'),
+    sw('Алерты по спреду', 'Присылать сигнал, когда разрыв между медианой рынка и лучшей ценой превышает заданный ниже порог.', 'notifySpread'),
+    h('div.panel-body', slider('Порог спреда', 'notifySpreadPct', 0.2, 5, 0.1, '%',
+      'Значение спреда к медиане, с которого ситуация в стакане считается выгодной и приходит алерт.')),
+    sw('Новые мерчанты', 'Уведомлять, когда в стакан по текущей паре и региону добавляется новый оффер.', 'notifyNewMerchant'),
+    sw('Статусы сделок', 'Пуш на каждом шаге сделки: оплата, отпуск актива, завершение или спор.', 'notifyDealStatus'),
   );
 
   /* ---------- appearance ---------- */
@@ -4680,11 +5012,12 @@ function SettingsScreen() {
   );
 
   const appearance = h('div',
-    h('div.panel.panel-body', h('label.field', h('span.label', 'Тема'), themeSeg)),
+    h('div.panel.panel-body', h('label.field', h('span.label', 'Тема'), themeSeg,
+      h('p.set-desc', 'Светлая и тёмная схемы — обе в фирменной палитре Bybit. Применяется сразу ко всему интерфейсу.'))),
     h('div.panel',
-      sw('Компактные строки', 'Скрыть способы оплаты в стакане', 'compactRows'),
-      sw('Скрывать баланс при входе', 'Баланс по умолчанию замылен', 'hideBalanceDefault'),
-      sw('Виброотклик', 'Haptic feedback в Telegram', 'haptics'),
+      sw('Компактные строки', 'Убрать бейджи способов оплаты из строк стакана — в список помещается больше оферов.', 'compactRows'),
+      sw('Скрывать баланс при входе', 'При каждом запуске баланс кошелька скрыт (размыт), пока вы не тапнете по нему.', 'hideBalanceDefault'),
+      sw('Виброотклик', 'Короткая вибрация на тап и важные действия внутри Telegram. Вне Telegram ни на что не влияет.', 'haptics'),
     ),
   );
 
@@ -4882,7 +5215,7 @@ function reset() {
 __m["src/screens/profile.js"] = function (__x, __req) {
 /** Профиль — KYC-верификация, тариф B2B, безопасность, статистика. */
 const { h, icon, mount } = __req("src/core/dom.js");
-const { state, set, on, KYC_LEVELS, PLANS, plan, kycInfo } = __req("src/core/store.js");
+const { state, set, on, KYC_LEVELS, PLANS, plan, activePlan, planActive, planRemainingMs, trialAvailable, subscribePlan, cancelPlan, kycInfo, DAY_MS } = __req("src/core/store.js");
 const { fmt0, fmtN, compact, dateTime, ago, mask } = __req("src/core/format.js");
 const { openSheet, confirmSheet } = __req("src/ui/sheet.js");
 const { toast } = __req("src/ui/toast.js");
@@ -4912,7 +5245,6 @@ function ProfileScreen() {
 
   function renderHead() {
     const p = state.profile;
-    const pl = plan();
     const k = state.kyc;
     mount(headSlot,
       h('div.panel',
@@ -5133,45 +5465,114 @@ function ProfileScreen() {
     });
   }
 
-  /* ---------------- plan (B2B) ---------------- */
+  /* ---------------- подписка ---------------- */
 
-  const pl = plan();
-  const planBlock = h('div',
-    h('div.plan',
-      h('div.plan-top',
-        h('span.plan-name', pl.name),
-        h('span.badge.badge-acid', icon('zap'), 'b2b saas'),
-        h('span.mono', { style: { marginLeft: 'auto', fontSize: '15px', fontWeight: '700' } }, pl.price ? `$${pl.price}/мес` : 'free'),
-      ),
-      h('div.usage',
-        usageRow('API-вызовы', state.profile.apiUsed, pl.apiCalls),
-        usageRow('Места в команде', state.profile.seatsUsed, pl.seats),
-        usageRow('Подключено бирж', state.filters.exchanges.length, pl.exchanges),
-      ),
-    ),
-    h('div.plan-grid', { style: { marginTop: '10px' } },
-      PLANS.map((p) => h('button.plan-card', {
-        class: p.id === state.profile.plan ? 'is-active' : '',
-        onClick: () => {
-          set('profile', (pr) => { pr.plan = p.id; });
-          toast('Тариф изменён', `${p.name} · ${p.seats} мест · ${compact(p.apiCalls)} вызовов`, 'ok');
-          navigateRefresh();
-        },
-      },
-        h('div.pn', p.name),
-        h('div.pp', p.price ? `$${p.price}` : '0'),
-        h('div.pu', `${p.seats} мест`),
-      )),
-    ),
-  );
+  const planSlot = h('div');
 
-  function usageRow(label, used, total) {
-    const pctv = total ? Math.min(100, (used / total) * 100) : 0;
-    return h('div.usage-row',
-      h('div.ur-top', h('span.l', label), h('span.v', `${compact(used)} / ${total === Infinity ? '∞' : compact(total)}`)),
-      h('div.meter', h('i', { class: pctv > 85 ? 'sell' : pctv > 60 ? 'warn' : '', style: { width: `${pctv}%` } })),
+  function fmtLeft(ms) {
+    if (ms <= 0) return 'истекла';
+    const d = Math.floor(ms / DAY_MS);
+    const hrs = Math.floor((ms % DAY_MS) / 3600000);
+    if (d >= 1) return `${d} дн · ${hrs} ч`;
+    const mins = Math.floor((ms % 3600000) / 60000);
+    return `${hrs} ч · ${mins} мин`;
+  }
+
+  function statusBanner() {
+    const ap = activePlan();
+    if (ap) {
+      const remaining = planRemainingMs();
+      const pct = ap.days ? Math.max(2, Math.min(100, (remaining / (ap.days * DAY_MS)) * 100)) : 0;
+      return h('div.sub-status.is-on',
+        h('div.sub-status-row',
+          h('div.deal-ico', icon('crown', { class: 't-acid' })),
+          h('div.row-main',
+            h('div.row-title', `Активна: ${ap.name}`,
+              ap.bestOffers ? h('span.badge.badge-acid', { style: { marginLeft: '6px' } }, icon('crown'), 'лучшие стаканы') : null),
+            h('div.row-sub', `Осталось ${fmtLeft(remaining)} · до ${dateTime(state.profile.planUntil)}`),
+          ),
+        ),
+        h('div.meter', { style: { marginTop: '10px' } }, h('i', { class: pct < 15 ? 'warn' : 'buy', style: { width: `${pct}%` } })),
+      );
+    }
+    const cur = plan();   // тариф был, но срок вышел
+    if (cur) {
+      return h('div.sub-status.is-off',
+        h('div.sub-status-row',
+          h('div.deal-ico', icon('clock', { class: 't-sell' })),
+          h('div.row-main',
+            h('div.row-title', `Подписка истекла: ${cur.name}`),
+            h('div.row-sub', 'Оформите тариф заново, чтобы вернуть доступ'),
+          ),
+        ),
+      );
+    }
+    return h('div.sub-status',
+      h('div.sub-status-row',
+        h('div.deal-ico', icon('lock', { class: 't-muted' })),
+        h('div.row-main',
+          h('div.row-title', 'Подписка не оформлена'),
+          h('div.row-sub', trialAvailable() ? 'Попробуйте 1 день бесплатно' : 'Выберите тариф ниже'),
+        ),
+      ),
     );
   }
+
+  function planCard(p) {
+    const ap = activePlan();
+    const isCurrent = !!ap && ap.id === p.id;
+    const isTrial = p.id === 'trial';
+    const trialBlocked = isTrial && !trialAvailable();
+    const btnLabel = isCurrent ? 'Текущий тариф'
+      : trialBlocked ? 'Пробный использован'
+      : isTrial ? 'Активировать пробный'
+      : 'Оформить';
+    return h('div.sub-card', { class: `${isCurrent ? 'is-current' : ''}${p.bestOffers ? ' is-top' : ''}` },
+      p.bestOffers ? h('div.sub-ribbon', 'лучшие стаканы') : null,
+      h('div.sub-card-head',
+        h('div', { style: { minWidth: '0' } },
+          h('div.sub-name', p.name, p.bestOffers ? icon('crown', { class: 'sub-crown' }) : null),
+          h('div.sub-term', p.term),
+        ),
+        h('div.sub-price',
+          p.price ? h('span.sub-amount', `$${p.price}`) : h('span.sub-amount', 'бесплатно'),
+          p.price ? h('span.sub-per', `/ ${p.term}`) : null,
+        ),
+      ),
+      h('ul.sub-perks', p.perks.map((perk) => h('li', icon('check', { class: 't-buy' }), h('span', perk)))),
+      h('button.btn.btn-block', {
+        class: isCurrent ? 'btn-ghost' : p.bestOffers ? 'btn-primary' : 'btn-soft',
+        disabled: isCurrent || trialBlocked,
+        onClick: () => {
+          if (subscribePlan(p.id)) {
+            toast('Подписка оформлена', `${p.name} · ${p.term}`, 'ok');
+            renderPlan();
+          } else {
+            toast('Недоступно', isTrial ? 'Пробный период уже использован' : 'Не удалось оформить', 'warn');
+          }
+        },
+      }, btnLabel),
+    );
+  }
+
+  function renderPlan() {
+    const ap = activePlan();
+    mount(planSlot,
+      statusBanner(),
+      ap ? h('button.btn.btn-ghost.btn-block', {
+        style: { marginTop: '8px' },
+        onClick: async () => {
+          if (await confirmSheet({ title: 'Отменить подписку?', message: `Тариф «${ap.name}» будет отключён, доступ к платным функциям закроется.`, confirmLabel: 'Отменить', danger: true })) {
+            cancelPlan(); renderPlan(); toast('Подписка отменена', null, 'warn');
+          }
+        },
+      }, 'Отменить подписку') : null,
+      h('div.sub-list', { style: { marginTop: '10px' } }, PLANS.map(planCard)),
+      h('div.note', { style: { marginTop: '10px' } }, icon('info'),
+        'Лучшие стаканы (метки «★ Лучшая» и «ТОП») доступны только на тарифе «3 месяца». На проде оплата проходит через платёжный провайдер; здесь подписка активируется локально для демонстрации.'),
+    );
+  }
+  renderPlan();
 
   /* ---------------- security ---------------- */
 
@@ -5277,10 +5678,8 @@ function ProfileScreen() {
 
   function row(k, v) { return h('div.kv', h('dt', k), h('dd', v)); }
 
-  function navigateRefresh() { renderHead(); }
-
   unsubs.push(on('kyc', () => { renderKyc(); renderHead(); updateKycBadge(); renderStats(); }));
-  unsubs.push(on(['profile', 'stats'], () => { renderHead(); renderStats(); }));
+  unsubs.push(on(['profile', 'stats'], () => { renderHead(); renderStats(); renderPlan(); }));
 
   renderHead();
   renderKyc();
@@ -5310,8 +5709,8 @@ function ProfileScreen() {
     h('div', { style: { '--i': 1 } }, regionSlot),
     title('KYC-верификация', 1, kycBadge),
     h('div', { style: { '--i': 2 } }, kycSlot),
-    title('Тариф', 3),
-    h('div', { style: { '--i': 4 } }, planBlock),
+    title('Подписка', 3),
+    h('div', { style: { '--i': 4 } }, planSlot),
     title('Безопасность', 5),
     h('div', { style: { '--i': 6 } }, security),
     title('Статистика', 7),
@@ -5380,6 +5779,7 @@ const { startFeed } = __req("src/services/feed.js");
 const { log } = __req("src/services/logs.js");
 const { HomeScreen } = __req("src/screens/home.js");
 const { P2PScreen } = __req("src/screens/p2p.js");
+const { TopScreen } = __req("src/screens/top.js");
 const { SettingsScreen } = __req("src/screens/settings.js");
 const { ProfileScreen } = __req("src/screens/profile.js");
 const { closeTopSheet, sheetOpen } = __req("src/ui/sheet.js");
@@ -5407,6 +5807,7 @@ function boot() {
 
   register('home', HomeScreen);
   register('p2p', P2PScreen);
+  register('top', TopScreen);
   register('settings', SettingsScreen);
   register('profile', ProfileScreen);
 

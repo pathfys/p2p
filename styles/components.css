@@ -47,6 +47,8 @@
 .btn-sell { background: var(--sell); color: #1b0407; border-color: var(--sell); font-weight: 750; }
 .btn-ghost { background: transparent; border-color: var(--line); }
 .btn-ghost:hover { background: var(--panel-2); }
+.btn-soft { background: var(--panel-3); border-color: var(--line); color: var(--ink); font-weight: 700; }
+.btn-soft:hover { background: color-mix(in srgb, var(--panel-3) 70%, var(--ink-4)); }
 .btn-danger { background: var(--sell-ghost); color: var(--sell); border-color: color-mix(in srgb, var(--sell) 35%, transparent); }
 .btn-sm { height: 32px; padding: 0 11px; font-size: 12.5px; border-radius: var(--r-sm); }
 .btn-xs { height: 26px; padding: 0 9px; font-size: 11px; border-radius: 7px; font-weight: 650; }
@@ -150,6 +152,10 @@
   margin-bottom: 6px;
 }
 .field > .label .hint { margin-left: auto; flex: 0 0 auto; font-size: 10px; letter-spacing: 0; text-transform: none; color: var(--ink-4); font-weight: 500; }
+
+/* пояснительный текст под настройкой */
+.set-desc { margin: 7px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--ink-3); }
+.switch-row + .set-desc { margin: -4px 0 0; padding: 0 14px 11px; }
 
 .input, .select, .textarea {
   width: 100%;

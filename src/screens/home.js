@@ -122,7 +122,6 @@ function hero() {
     h('div.hero-top',
       h('span.eyebrow', 'Баланс кошелька'),
       b.locked > 0 ? h('span.badge.badge-warn', icon('clock'), `эскроу ${fmt0(b.locked)}`) : null,
-      h('span.badge.badge-acid', icon('cpu'), 'ai on'),
     ),
     h('button.balance-tap', {
       'aria-label': hidden ? 'Показать баланс' : 'Скрыть баланс',
