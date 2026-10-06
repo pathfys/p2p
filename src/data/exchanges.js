@@ -24,32 +24,31 @@ export const EXCHANGES = [
 
 export const EX = Object.fromEntries(EXCHANGES.map((e) => [e.id, e]));
 
+// Цена актива в USD (≈ в USDT). Цена в любой валюте = usd × курс валюты,
+// поэтому новые валюты подключаются без правок здесь (см. regions.js).
 export const ASSETS = [
-  { id: 'USDT', name: 'Tether',   icon: './assets/coins/usdt.png', base: { RUB: 97.4, USD: 1.0, EUR: 0.92, UAH: 41.3, KZT: 492 }, dp: 2 },
-  { id: 'BTC',  name: 'Bitcoin',  icon: './assets/coins/btc.png',  base: { RUB: 6_380_000, USD: 65_400, EUR: 60_100, UAH: 2_700_000, KZT: 32_100_000 }, dp: 6 },
-  { id: 'ETH',  name: 'Ethereum', icon: './assets/coins/eth.png',  base: { RUB: 247_000, USD: 2_530, EUR: 2_330, UAH: 104_000, KZT: 1_245_000 }, dp: 4 },
-  { id: 'BNB',  name: 'BNB',      icon: './assets/coins/bnb.png',  base: { RUB: 57_900, USD: 594, EUR: 547, UAH: 24_500, KZT: 292_000 }, dp: 4 },
-  { id: 'SOL',  name: 'Solana',   icon: './assets/coins/sol.png',  base: { RUB: 14_200, USD: 146, EUR: 134, UAH: 6_020, KZT: 71_800 }, dp: 4 },
-  { id: 'TON',  name: 'Toncoin',  icon: './assets/coins/ton.png',  base: { RUB: 512, USD: 5.26, EUR: 4.84, UAH: 217, KZT: 2_590 }, dp: 3 },
+  { id: 'USDT', name: 'Tether',   icon: './assets/coins/usdt.png', usd: 1,      dp: 2 },
+  { id: 'BTC',  name: 'Bitcoin',  icon: './assets/coins/btc.png',  usd: 65_400, dp: 6 },
+  { id: 'ETH',  name: 'Ethereum', icon: './assets/coins/eth.png',  usd: 2_530,  dp: 4 },
+  { id: 'BNB',  name: 'BNB',      icon: './assets/coins/bnb.png',  usd: 594,    dp: 4 },
+  { id: 'SOL',  name: 'Solana',   icon: './assets/coins/sol.png',  usd: 146,    dp: 4 },
+  { id: 'TON',  name: 'Toncoin',  icon: './assets/coins/ton.png',  usd: 5.26,   dp: 3 },
 ];
 
 export const AST = Object.fromEntries(ASSETS.map((a) => [a.id, a]));
 
-export const FIATS = [
-  { id: 'RUB', sym: '₽', name: 'Рубль' },
-  { id: 'USD', sym: '$', name: 'Доллар' },
-  { id: 'EUR', sym: '€', name: 'Евро' },
-  { id: 'UAH', sym: '₴', name: 'Гривна' },
-  { id: 'KZT', sym: '₸', name: 'Тенге' },
-];
+import { CURRENCIES as _CUR, methodsFor as _methodsFor } from './regions.js';
 
-export const FIAT = Object.fromEntries(FIATS.map((f) => [f.id, f]));
+// реэкспорт для обратной совместимости импортов из exchanges.js
+export const CURRENCIES = _CUR;
+export const CUR = _CUR;
+export const FIAT = _CUR;          // для .sym lookups
+export const methodsFor = _methodsFor;
 
-/** Which payment rails exist per fiat — keeps the mock feed plausible. */
-export const FIAT_METHODS = {
-  RUB: ['sber', 'tbank', 'alfa', 'vtb', 'raif', 'ozon', 'sbp', 'yoomoney', 'cash'],
-  USD: ['wire', 'cash'],
-  EUR: ['wire', 'cash'],
-  UAH: ['sbp', 'cash', 'wire'],
-  KZT: ['sber', 'sbp', 'cash', 'wire'],
-};
+/** Цена 1 единицы актива в указанной валюте. */
+export function assetRate(asset, cur) {
+  const a = AST[asset];
+  const c = _CUR[cur];
+  if (!a || !c) return 0;
+  return a.usd * c.rate;
+}

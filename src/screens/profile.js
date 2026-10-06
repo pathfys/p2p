@@ -6,6 +6,8 @@ import { openSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { STEP_ORDER, STEP_META, stepsFor, validateStep, saveStep, canSubmit, submit, reset } from '../services/kyc.js';
 import { inTelegram, closeApp } from '../services/telegram.js';
+import { openRegionSheet } from '../ui/regionSheet.js';
+import { COUNTRY, CUR } from '../data/regions.js';
 
 export function ProfileScreen() {
   const root = h('div.stagger');
@@ -404,8 +406,27 @@ export function ProfileScreen() {
   updateKycBadge();
   renderStats();
 
+  const regionSlot = h('div');
+  function renderRegion() {
+    const c = state.region ? COUNTRY[state.region] : null;
+    mount(regionSlot, h('div.panel.panel-flush',
+      h('button.row', { onClick: () => openRegionSheet({ onPick: renderRegion }) },
+        h('div.deal-ico', { style: { fontSize: '18px' } }, c?.flag || '🌐'),
+        h('div.row-main',
+          h('div.row-title', c ? c.name : 'Регион не выбран'),
+          h('div.row-sub', c ? `${CUR[c.cur]?.name || c.cur} · ${c.cur}` : 'Нажмите, чтобы выбрать'),
+        ),
+        icon('chev', { class: 'row-chev' }),
+      ),
+    ));
+  }
+  renderRegion();
+  unsubs.push(on('region', renderRegion));
+
   root.append(
     h('div', { style: { '--i': 0 } }, headSlot),
+    title('Регион', 1),
+    h('div', { style: { '--i': 1 } }, regionSlot),
     title('KYC-верификация', 1, kycBadge),
     h('div', { style: { '--i': 2 } }, kycSlot),
     title('Тариф', 3),

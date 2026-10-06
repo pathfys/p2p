@@ -6,7 +6,7 @@ import { uid } from './format.js';
 
 // v2: баланс и карты стартуют пустыми; старое состояние v1 игнорируется
 const LS_KEY = 'p2pdesk.state.v2';
-const PERSIST = ['balance', 'cards', 'settings', 'kyc', 'purchases', 'ui', 'filters', 'profile', 'stats'];
+const PERSIST = ['balance', 'cards', 'settings', 'kyc', 'purchases', 'ui', 'filters', 'profile', 'stats', 'region', 'quests', 'wheel'];
 
 export const PAY_METHODS = [
   { id: 'sber',      name: 'Сбербанк',    risk: 0.08, tint: '#2ecc71' },
@@ -19,6 +19,13 @@ export const PAY_METHODS = [
   { id: 'yoomoney',  name: 'ЮMoney',      risk: 0.22, tint: '#8b3ffd' },
   { id: 'cash',      name: 'Наличные',    risk: 0.34, tint: '#9aa4a1' },
   { id: 'wire',      name: 'SWIFT/SEPA',  risk: 0.18, tint: '#4ea8ff' },
+  // международные рельсы для валют вне РФ
+  { id: 'bank',      name: 'Банк. перевод', risk: 0.12, tint: '#5b8def' },
+  { id: 'card',      name: 'Карта',       risk: 0.16, tint: '#f7a600' },
+  { id: 'sepa',      name: 'SEPA',        risk: 0.10, tint: '#003399' },
+  { id: 'wise',      name: 'Wise',        risk: 0.13, tint: '#9fe870' },
+  { id: 'revolut',   name: 'Revolut',     risk: 0.15, tint: '#0666eb' },
+  { id: 'paypal',    name: 'PayPal',      risk: 0.24, tint: '#0070ba' },
 ];
 
 export const KYC_LEVELS = [
@@ -129,6 +136,15 @@ function defaults() {
     },
 
     stats: { volumeUsdt: 0, deals: 0, won: 0, spreadSum: 0, profitUsdt: 0, dayVolume: 0, dayKey: new Date().toDateString() },
+
+    // регион: null → показываем выбор при первом входе
+    region: null,
+
+    // еженедельные задания: счётчики недели + отметка о получении приза
+    quests: { weekKey: weekKey(), deals: 0, volume: 0, claimed: false },
+
+    // колесо фортуны: баланс прокрутов + история
+    wheel: { spins: 1, lastResult: null, history: [] },
 
     ui: { tab: 'home', balanceHidden: false, logPaused: false, pickedOffer: null },
 
@@ -247,4 +263,66 @@ export function rollDay() {
     state.stats.dayVolume = 0;
     emit('stats', state.stats);
   }
+  rollWeek();
+}
+
+/* ---------- регион ---------- */
+
+export function setRegion(code) {
+  const prev = state.region;
+  state.region = code;
+  emit('region', code);
+  if (prev !== code) emit('quests', state.quests);   // «сменил регион» — для заданий
+  persist();
+}
+
+/* ---------- еженедельные задания ---------- */
+
+/** Понедельник текущей недели как ключ (YYYY-MM-DD). */
+export function weekKey(d = new Date()) {
+  const t = new Date(d);
+  const dow = (t.getDay() + 6) % 7;        // 0 = понедельник
+  t.setDate(t.getDate() - dow);
+  t.setHours(0, 0, 0, 0);
+  return t.toISOString().slice(0, 10);
+}
+
+export function rollWeek() {
+  const key = weekKey();
+  if (state.quests.weekKey !== key) {
+    state.quests = { weekKey: key, deals: 0, volume: 0, claimed: false };
+    emit('quests', state.quests);
+  }
+}
+
+export const QUESTS = [
+  { id: 'deals',  title: 'Соверши 5 закупок',       target: 5,      metric: (s) => s.quests.deals },
+  { id: 'volume', title: 'Наторгуй 10 000 USDT',    target: 10000,  metric: (s) => s.quests.volume },
+  { id: 'kyc',    title: 'Пройди KYC-верификацию',  target: 1,      metric: (s) => (s.kyc.status === 'approved' ? 1 : 0) },
+  { id: 'card',   title: 'Добавь платёжную карту',  target: 1,      metric: (s) => Math.min(1, s.cards.length) },
+];
+
+export function questProgress() {
+  rollWeek();
+  const list = QUESTS.map((q) => {
+    const cur = Math.min(q.target, q.metric(state));
+    return { ...q, cur, done: cur >= q.target };
+  });
+  const doneCount = list.filter((q) => q.done).length;
+  return { list, doneCount, total: QUESTS.length, allDone: doneCount === QUESTS.length };
+}
+
+/** Забрать приз за выполнение всех заданий недели → +1 прокрут. */
+export function claimQuestReward() {
+  const p = questProgress();
+  if (!p.allDone || state.quests.claimed) return false;
+  set('quests', (q) => { q.claimed = true; });
+  set('wheel', (w) => { w.spins += 1; });
+  return true;
+}
+
+/** Засчитать закупку в недельные задания. */
+export function trackDealForQuests(volumeUsdt) {
+  rollWeek();
+  set('quests', (q) => { q.deals += 1; q.volume += Math.max(0, volumeUsdt); });
 }

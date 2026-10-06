@@ -13,6 +13,7 @@ import { SettingsScreen } from './screens/settings.js';
 import { ProfileScreen } from './screens/profile.js';
 import { closeTopSheet, sheetOpen } from './ui/sheet.js';
 import { splashLeave, splashGuard } from './ui/splash.js';
+import { openRegionSheet } from './ui/regionSheet.js';
 import { qs } from './core/dom.js';
 
 /* ---------- theme ---------- */
@@ -45,6 +46,9 @@ function boot() {
   log('info', 'sys', `P2P Light запущен · ${inTelegram ? 'Telegram Mini App' : 'браузер'}`);
 
   startFeed();
+
+  // первый вход: обязательный выбор региона (открывается под сплэшем)
+  if (!state.region) openRegionSheet({ mandatory: true });
 
   // главный экран уже смонтирован под сплэшем — запускаем уход заставки
   splashLeave();

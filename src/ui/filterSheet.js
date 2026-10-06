@@ -2,8 +2,7 @@
 import { h, icon } from '../core/dom.js';
 import { openSheet } from './sheet.js';
 import { state, set, PAY_METHODS } from '../core/store.js';
-import { EXCHANGES } from '../data/exchanges.js';
-import { FIAT_METHODS } from '../data/exchanges.js';
+import { EXCHANGES, methodsFor } from '../data/exchanges.js';
 import { resubscribe } from '../services/feed.js';
 import { toast } from './toast.js';
 
@@ -41,7 +40,7 @@ export function activeFilterCount() {
 
 export function openFilterSheet(onApply) {
   const draft = JSON.parse(JSON.stringify(state.filters));
-  const pool = FIAT_METHODS[draft.fiat] || PAY_METHODS.map((m) => m.id);
+  const pool = methodsFor(draft.fiat);
 
   const numField = (label, key, hint) => {
     const input = h('input.input.num', {

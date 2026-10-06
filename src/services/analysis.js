@@ -6,7 +6,7 @@
  * recommended or rejected. Weights are user-tunable in Настройки → AI.
  */
 import { state, PAY_METHODS } from '../core/store.js';
-import { EX, AST } from '../data/exchanges.js';
+import { EX, AST, assetRate } from '../data/exchanges.js';
 
 const METHOD_RISK = Object.fromEntries(PAY_METHODS.map((m) => [m.id, m.risk]));
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -14,16 +14,16 @@ const clamp01 = (v) => Math.min(1, Math.max(0, v));
 /** Volume in USDT → amount of the traded asset. */
 export function usdtToAsset(volumeUsdt, asset, fiat) {
   if (asset === 'USDT') return volumeUsdt;
-  const usdtUnit = AST.USDT.base[fiat];
-  const assetUnit = AST[asset].base[fiat];
-  return (volumeUsdt * usdtUnit) / assetUnit;
+  const usdtUnit = assetRate('USDT', fiat);
+  const assetUnit = assetRate(asset, fiat);
+  return assetUnit ? (volumeUsdt * usdtUnit) / assetUnit : 0;
 }
 
 export function assetToUsdt(amount, asset, fiat) {
   if (asset === 'USDT') return amount;
-  const usdtUnit = AST.USDT.base[fiat];
-  const assetUnit = AST[asset].base[fiat];
-  return (amount * assetUnit) / usdtUnit;
+  const usdtUnit = assetRate('USDT', fiat);
+  const assetUnit = assetRate(asset, fiat);
+  return usdtUnit ? (amount * assetUnit) / usdtUnit : 0;
 }
 
 /* ------------------------------ components ------------------------------ */
@@ -152,7 +152,7 @@ export function analyze(offer, volumeUsdt = state.settings.volume) {
     ? effPrice * (1 + s.targetMargin / 100)
     : effPrice * (1 - s.targetMargin / 100);
   const profitFiat = Math.abs(exitPrice - effPrice) * fillable - feeFiat;
-  const profitUsdt = profitFiat / AST.USDT.base[offer.fiat];
+  const profitUsdt = profitFiat / (assetRate('USDT', offer.fiat) || 1);
 
   /* ---- verdict ---- */
   const confidence = Math.round(clamp01(

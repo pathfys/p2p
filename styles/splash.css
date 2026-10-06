@@ -67,11 +67,10 @@
 .sp-p2p {
   display: flex;
   justify-content: center;
-  font-family: var(--font-ui);
+  font-family: var(--font-display);
   font-weight: 800;
-  font-stretch: 122%;
-  font-size: clamp(88px, 30vw, 184px);
-  letter-spacing: -.045em;
+  font-size: clamp(82px, 27vw, 168px);
+  letter-spacing: -.03em;
   color: #fff;
   text-shadow: 0 2px 0 rgba(0,0,0,.3), 0 18px 44px rgba(0,0,0,.75);
 }

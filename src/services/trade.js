@@ -5,7 +5,7 @@
  *   created → paid → released → done  (or cancelled / disputed)
  * Fiat leaves the selected card, crypto lands on the USDT balance.
  */
-import { state, set, emit, canTrade, kycInfo, PAY_METHODS } from '../core/store.js';
+import { state, set, emit, canTrade, kycInfo, PAY_METHODS, trackDealForQuests } from '../core/store.js';
 import { uid } from '../core/format.js';
 import { log } from './logs.js';
 import { analyze, assetToUsdt } from './analysis.js';
@@ -124,6 +124,7 @@ export function execute(offer, volumeUsdt, cardId, method) {
     st.volumeUsdt += usdtDelta;
     st.spreadSum += Math.abs(ctx.dev);
   });
+  trackDealForQuests(usdtDelta);     // недельные задания
 
   log('trade', offer.exchange,
     `ЗАКУПКА <b>${deal.ref}</b> · ${amount.toFixed(2)} ${offer.asset} @ ${offer.price.toFixed(2)} ${offer.fiat} · ${PM[deal.method]?.name || deal.method}`);

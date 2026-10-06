@@ -9,7 +9,7 @@
  * normalises Binance/Bybit/OKX/... into one offer shape and streams it here.
  */
 import { state, emit, set } from '../core/store.js';
-import { EXCHANGES, EX, AST, FIAT_METHODS } from '../data/exchanges.js';
+import { EXCHANGES, EX, AST, assetRate, methodsFor } from '../data/exchanges.js';
 import { mulberry, hashStr, merchantName, merchantTerms } from '../data/merchants.js';
 import { log } from './logs.js';
 
@@ -404,7 +404,7 @@ class MockVenue {
     this.rnd = mulberry(hashStr(exId + asset + fiat + side));
     this.seq = 0;
     this.offers = new Map();
-    const mid = AST[asset].base[fiat];
+    const mid = assetRate(asset, fiat);
     // venue premium: less reliable venues sit wider off mid
     this.premium = (1 - this.ex.reliability) * 0.6 * (this.rnd() - 0.3);
     this.mid = mid * (1 + this.premium * 0.01);
@@ -417,9 +417,8 @@ class MockVenue {
     const id = `${this.ex.id}:${++this.seq}`;
     const idx = rank ?? Math.floor(r() * 10);
     const dev = (0.0015 + idx * 0.0011 + r() * 0.0014) * (this.side === 'buy' ? 1 : -1);
-    const a = AST[this.asset];
-    const unit = a.base[this.fiat];
-    const usdtScale = this.asset === 'USDT' ? 1 : unit / AST.USDT.base[this.fiat];
+    const unit = assetRate(this.asset, this.fiat);
+    const usdtScale = this.asset === 'USDT' ? 1 : unit / (assetRate('USDT', this.fiat) || 1);
 
     // liquidity in asset units, roughly 500..90000 USDT-equivalent
     const liqUsdt = 400 + r() * r() * 90000;
@@ -427,7 +426,7 @@ class MockVenue {
 
     const orders = Math.floor(20 + r() ** 1.6 * 9000);
     const completion = 0.80 + r() * 0.198;
-    const pool = FIAT_METHODS[this.fiat] || ['wire'];
+    const pool = methodsFor(this.fiat);
     const nMethods = 1 + Math.floor(r() * Math.min(3, pool.length));
     const methods = [...pool].sort(() => r() - 0.5).slice(0, nMethods);
 
@@ -472,7 +471,7 @@ class MockVenue {
   tick() {
     const r = this.rnd;
     // mid random walk, mean-reverting toward the published base
-    const base = AST[this.asset].base[this.fiat] * (1 + this.premium * 0.01);
+    const base = assetRate(this.asset, this.fiat) * (1 + this.premium * 0.01);
     this.mid += (base - this.mid) * 0.06 + this.mid * (r() - 0.5) * 0.0009;
 
     const upserts = [];

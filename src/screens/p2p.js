@@ -8,7 +8,8 @@
 import { h, icon, mount, sparkline, clear } from '../core/dom.js';
 import { state, set, on, PAY_METHODS } from '../core/store.js';
 import { fmtN, fmt0, compact, hhmmss } from '../core/format.js';
-import { EXCHANGES, EX, ASSETS, FIATS, FIAT } from '../data/exchanges.js';
+import { EXCHANGES, EX, ASSETS, FIAT } from '../data/exchanges.js';
+import { regionChip, openRegionSheet } from '../ui/regionSheet.js';
 import { analyze, buildPlan, usdtToAsset } from '../services/analysis.js';
 import { resubscribe, recomputeMarket } from '../services/feed.js';
 import { clearLogs, exportLogs } from '../services/logs.js';
@@ -131,10 +132,7 @@ export function P2PScreen({ slot }) {
       onChange: (e) => { set('filters', (x) => { x.asset = e.target.value; }); switchMarket(); },
     }, ASSETS.map((a) => h('option', { value: a.id, selected: a.id === f.asset }, `${a.id} · ${a.name}`)));
 
-    hRefs.fiatSel = h('select.select', {
-      style: { flex: '1' }, 'aria-label': 'Фиат',
-      onChange: (e) => { set('filters', (x) => { x.fiat = e.target.value; x.methods = []; }); switchMarket(); },
-    }, FIATS.map((x) => h('option', { value: x.id, selected: x.id === f.fiat }, `${x.id} ${x.sym}`)));
+    hRefs.regionChip = regionChip(() => openRegionSheet({ onPick: () => switchMarket() }));
 
     hRefs.buyBtn = h('button', {
       'data-side': 'buy', 'aria-pressed': String(f.side === 'buy'),
@@ -153,7 +151,7 @@ export function P2PScreen({ slot }) {
 
     mount(headSlot,
       h('div.panel.panel-body',
-        h('div', { style: { display: 'flex', gap: '8px', marginBottom: '10px' } }, hRefs.assetSel, hRefs.fiatSel),
+        h('div', { style: { display: 'flex', gap: '8px', marginBottom: '10px' } }, hRefs.assetSel, hRefs.regionChip),
         h('div.seg.seg-sides', hRefs.buyBtn, hRefs.sellBtn),
         h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: '14px', marginTop: '12px' } },
           h('div',
@@ -193,8 +191,8 @@ export function P2PScreen({ slot }) {
   function switchMarket() {
     rows.clear();
     clear(bookBody);
+    buildHead();            // пересобрать шапку: чип региона и валютные подписи
     resubscribe();
-    updateHead();
     renderVol();
     renderPlan();
     renderBook(true);
@@ -621,10 +619,16 @@ export function P2PScreen({ slot }) {
   // "<img onerror=…>" станет безопасным текстом, а форматирование сохранится.
   const safeLogHTML = (s) => esc(s).replace(/&lt;(\/?)b&gt;/g, '<$1b>');
 
+  // иконка по уровню события — вместо «командной строки» аккуратная лента
+  const LVL_ICON = { info: 'info', up: 'up', down: 'down', new: 'plus', gone: 'minus', warn: 'alert', alert: 'zap', trade: 'check' };
+
   const logLine = (e) => h('div.log-line', { class: `lv-${e.level}` },
-    h('span.log-ts', hhmmss(e.ts)),
-    h('span.log-ex', { style: { color: EX[e.exchange]?.tint || 'var(--ink-3)' } }, EX[e.exchange]?.tag || e.exchange),
+    h('span.log-ico', icon(LVL_ICON[e.level] || 'info')),
+    e.exchange && EX[e.exchange]
+      ? h('span.log-tag', { style: { '--tag': EX[e.exchange].tint } }, EX[e.exchange].name)
+      : h('span.log-tag.sys', 'система'),
     h('span.log-msg', { html: safeLogHTML(e.message) }),
+    h('time.log-ts', hhmmss(e.ts)),
   );
 
   function renderLogs() {

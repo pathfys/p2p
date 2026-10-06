@@ -11,6 +11,17 @@ import { h, icon, mount } from '../core/dom.js';
 import { openSheet } from './sheet.js';
 import { toast } from './toast.js';
 import { haptic } from '../services/telegram.js';
+import { state, set } from '../core/store.js';
+import { fmtN } from '../core/format.js';
+
+/** Зачислить выигрыш демо-слота на баланс/прокруты. */
+function creditPrize(slot) {
+  const bonus = { s1: 1, s5: 5, s10: 10, s50: 50 }[slot.id];
+  if (bonus) { set('balance', (b) => { b.usdt += bonus; }); return; }
+  if (slot.id === 'spin1') set('wheel', (w) => { w.spins += 1; });
+  if (slot.id === 'spin3') set('wheel', (w) => { w.spins += 3; });
+  // fee / miss — без зачисления (демо)
+}
 
 /* Демо-слоты: label — что показываем, weight — относительный шанс,
    tone — цвет сектора. Порядок = как на колесе по часовой стрелке. */
@@ -65,15 +76,24 @@ export function openWheelSheet() {
     h('div.fw-hub', icon('zap')),
   );
 
-  const spinBtn = h('button.btn.btn-primary.btn-block.fw-spin', { onClick: spin },
-    icon('refresh'), 'Прокрутить');
+  const spinBtn = h('button.btn.btn-primary.btn-block.fw-spin', { onClick: spin });
+  const spinsChip = h('span.badge.badge-acid');
+
+  function updateSpinBtn() {
+    const spins = state.wheel.spins;
+    spinsChip.textContent = `${spins} прокрут${spins === 1 ? '' : spins >= 2 && spins <= 4 ? 'а' : 'ов'}`;
+    if (spinning) { spinBtn.disabled = true; mount(spinBtn, 'Крутится…'); return; }
+    spinBtn.disabled = spins <= 0;
+    mount(spinBtn, spins > 0 ? [icon('refresh'), 'Прокрутить'] : [icon('info'), 'Нет прокрутов — выполни задания']);
+  }
 
   const resultEl = h('div.fw-result', { 'aria-live': 'polite' });
 
   function spin() {
-    if (spinning) return;
+    if (spinning || state.wheel.spins <= 0) return;
     spinning = true;
-    spinBtn.disabled = true;
+    set('wheel', (w) => { w.spins -= 1; });   // списываем прокрут
+    updateSpinBtn();
     mount(resultEl, '');
     haptic('medium');
 
@@ -91,9 +111,11 @@ export function openWheelSheet() {
     const done = () => {
       wheel.removeEventListener('transitionend', done);
       spinning = false;
-      spinBtn.disabled = false;
       const win = target.id !== 'miss';
       haptic(win ? 'success' : 'warning');
+      creditPrize(target);
+      set('wheel', (w) => { w.lastResult = target.id; w.history.unshift(target.id); if (w.history.length > 20) w.history.pop(); });
+      updateSpinBtn();
       mount(resultEl,
         h(`div.fw-win${win ? '' : ' is-miss'}`,
           icon(win ? 'zap' : 'info'),
@@ -106,11 +128,13 @@ export function openWheelSheet() {
     // страховка, если transitionend не придёт
     setTimeout(() => { if (spinning) done(); }, 5200);
   }
+  updateSpinBtn();
 
   openSheet({
     title: 'Колесо фортуны',
     subtitle: 'Крути и забирай приз',
     body: h('div.fw',
+      h('div', { style: { marginBottom: '8px' } }, spinsChip),
       h('div.fw-stage',
         h('div.fw-pointer', aria('')),
         wheel,

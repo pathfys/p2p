@@ -2,12 +2,13 @@
 import { h, icon, sparkline, mount } from '../core/dom.js';
 import { state, set, on, PAY_METHODS, kycInfo, rollDay } from '../core/store.js';
 import { splitAmount, fmtN, fmt0, compact, ago, dateTime, uid } from '../core/format.js';
-import { AST, FIAT } from '../data/exchanges.js';
+import { FIAT, assetRate } from '../data/exchanges.js';
 import { openSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { haptic } from '../services/telegram.js';
 import { openDealSheet } from '../ui/dealSheet.js';
 import { openWheelSheet } from '../ui/wheel.js';
+import { questsCard } from '../ui/quests.js';
 import { DEAL_STATUS } from '../services/trade.js';
 import { navigate } from '../core/router.js';
 
@@ -23,6 +24,7 @@ export function HomeScreen() {
   const tilesSlot = h('div');
   const cardsSlot = h('div');
   const dealsSlot = h('div');
+  const questsSlot = questsCard();
 
   const renderAll = () => {
     mount(kycSlot, kycBanner());
@@ -44,6 +46,7 @@ export function HomeScreen() {
     wrap(kycSlot, 0),
     wrap(heroSlot, 1),
     h('div', { style: { '--i': 2, marginTop: '12px' } }, promoBanner()),
+    h('div', { style: { '--i': 2, marginTop: '10px' } }, questsSlot),
     sectionTitle('Операции за сегодня', 2),
     wrap(tilesSlot, 3),
     sectionTitle('Баланс карточек', 4, h('button.btn.btn-xs.btn-ghost', { onClick: () => openCardSheet() }, icon('plus'), 'Карта')),
@@ -53,7 +56,7 @@ export function HomeScreen() {
     h('div.foot-note', 'P2P Light · агрегатор P2P-стаканов · данные обновляются в реальном времени во вкладке P2P'),
   );
 
-  return { node: root, destroy: () => unsubs.forEach((u) => u()) };
+  return { node: root, destroy: () => { unsubs.forEach((u) => u()); questsSlot._off?.(); } };
 }
 
 const wrap = (node, i) => h('div', { style: { '--i': i } }, node);
@@ -110,7 +113,7 @@ function kycBanner() {
 function hero() {
   const hidden = state.ui.balanceHidden;
   const b = state.balance;
-  const rate = AST.USDT.base[state.filters.fiat] || AST.USDT.base.RUB;
+  const rate = assetRate('USDT', state.filters.fiat) || assetRate('USDT', 'RUB');
   const [int, frac] = splitAmount(b.usdt, 2);
   const hist = state.market.history;
   const delta = hist.length > 2 ? ((hist[hist.length - 1] - hist[0]) / hist[0]) * 100 : 0;
@@ -164,7 +167,7 @@ export function openBalanceSheet(mode = 'set') {
     const n = parsed();
     if (!Number.isFinite(n)) return previewEl.textContent = '';
     const next = mode === 'set' ? n : mode === 'deposit' ? state.balance.usdt + n : state.balance.usdt - n;
-    previewEl.textContent = `Станет: ${fmtN(Math.max(0, next), 2)} USDT  ≈ ${fmt0(Math.max(0, next) * AST.USDT.base.RUB)} ₽`;
+    previewEl.textContent = `Станет: ${fmtN(Math.max(0, next), 2)} USDT  ≈ ${fmt0(Math.max(0, next) * assetRate('USDT', 'RUB'))} ₽`;
   }
   preview();
 

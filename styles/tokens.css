@@ -37,7 +37,8 @@
   --info-ghost:  rgba(74, 155, 255, 0.13);
 
   /* ---- type ---- */
-  --font-ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-ui: "Onest", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Unbounded", "Onest", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   /* ---- metrics ---- */
