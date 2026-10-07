@@ -38,15 +38,16 @@ class Settings:
     # Парсить только коллекции с floor не ниже этого значения, TON (0 = все ~11.7 млн NFT)
     crawl_min_floor_ton: float = 0.0
 
-    # Пороги режимов (суммарная оценка всех NFT владельца, в TON)
-    tier_medium_ton: float = 30.0
-    tier_rich_ton: float = 300.0
+    # Пороги уровней Low/Medium/Rich (суммарная оценка всех NFT владельца, в TON)
+    # Low: до tier_medium_ton · Medium: до tier_rich_ton · Rich: выше
+    tier_medium_ton: float = 10.0
+    tier_rich_ton: float = 100.0
     # Оценка подарка, если floor-цена коллекции неизвестна
     default_gift_ton: float = 3.0
 
     # Подарки владельца при поиске по @username
     results_per_page: int = 5
-    # Выдача людей: по 10 на странице, 2 страницы («След. страница» → «Назад» / «Повторить»)
+    # Выдача людей: по 10 на странице, 2 страницы («След. страница» -> «Назад» / «Повторить»)
     people_per_page: int = 10
     people_pages: int = 2
     # Перед выдачей проверять каждого человека живым запросом к t.me/nft (актуальный владелец)
@@ -83,8 +84,8 @@ def load_settings() -> Settings:
         recrawl_hours=int(os.getenv("RECRAWL_HOURS", "24")),
         chunk_size=int(os.getenv("CHUNK_SIZE", "50")),
         crawl_min_floor_ton=float(os.getenv("CRAWL_MIN_FLOOR_TON", "0")),
-        tier_medium_ton=float(os.getenv("TIER_MEDIUM_TON", "30")),
-        tier_rich_ton=float(os.getenv("TIER_RICH_TON", "300")),
+        tier_medium_ton=float(os.getenv("TIER_MEDIUM_TON", "10")),
+        tier_rich_ton=float(os.getenv("TIER_RICH_TON", "100")),
         default_gift_ton=float(os.getenv("DEFAULT_GIFT_TON", "3")),
         results_per_page=int(os.getenv("RESULTS_PER_PAGE", "5")),
         people_per_page=int(os.getenv("PEOPLE_PER_PAGE", "10")),

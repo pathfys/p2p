@@ -20,7 +20,7 @@ from .. import keyboards as kb
 from .. import texts
 from ..config import Settings
 from ..crawler import Crawler
-from ..db import TIERS, Database, SearchQuery
+from ..db import Database, SearchQuery
 from ..parsers.models import normalize_slug
 from ..people import PeopleParser
 from .common import safe_edit
@@ -33,10 +33,6 @@ log = logging.getLogger(__name__)
 
 class Search(StatesGroup):
     quick = State()
-
-
-def tier_of(mode: str) -> str | None:
-    return mode if mode in TIERS else None
 
 
 async def show_results(
@@ -66,10 +62,31 @@ async def show_results(
 
 # ------------------------------------------------------------- быстрый поиск
 @router.callback_query(kb.MenuCb.filter(F.action == "quick"))
-async def cb_quick(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_quick(call: CallbackQuery, state: FSMContext, settings: Settings) -> None:
     await state.set_state(Search.quick)
-    await safe_edit(call.message, texts.QUICK_PROMPT, kb.back_to_menu())
+    await safe_edit(call.message, texts.quick_prompt(settings), kb.quick_modes())
     await call.answer()
+
+
+@router.callback_query(kb.ModeCb.filter(F.src == "quick"))
+async def cb_quick_mode(
+    call: CallbackQuery, callback_data: kb.ModeCb, state: FSMContext, people_parser: PeopleParser, settings: Settings
+) -> None:
+    """Low / Medium / Rich — поток владельцев выбранного уровня."""
+    mode = callback_data.mode if callback_data.mode in texts.MODES else "all"
+    await call.answer(texts.PARSING)
+    query = SearchQuery(tier=mode if mode != "all" else None, seed=random.randint(1, 1_000_002))
+    await run_people(
+        call.message,
+        state,
+        people_parser,
+        settings,
+        query=query,
+        header=f"Уровень {texts.mode_label(mode)}",
+        mode=mode,
+        back="quick",
+        edit=True,
+    )
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -145,16 +162,15 @@ async def cb_page(
 
 
 # ----------------------------------------------------------- поиск по фильтрам
-async def _render_panel(call: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+async def _render_panel(call: CallbackQuery, state: FSMContext) -> None:
     filters = (await state.get_data()).get("filters", {})
-    mode = await db.get_mode(call.from_user.id)
-    await safe_edit(call.message, texts.filters_panel(filters, mode, settings), kb.filters_panel(filters, mode))
+    await safe_edit(call.message, texts.filters_panel(filters), kb.filters_panel(filters))
 
 
 @router.callback_query(kb.MenuCb.filter(F.action == "filters"))
-async def cb_filters(call: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+async def cb_filters(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(None)
-    await _render_panel(call, state, db, settings)
+    await _render_panel(call, state)
     await call.answer()
 
 
@@ -184,9 +200,7 @@ async def cb_pick(call: CallbackQuery, callback_data: kb.FilterCb, state: FSMCon
 
 
 @router.callback_query(kb.FilterCb.filter(F.action == "set"))
-async def cb_set(
-    call: CallbackQuery, callback_data: kb.FilterCb, state: FSMContext, db: Database, settings: Settings
-) -> None:
+async def cb_set(call: CallbackQuery, callback_data: kb.FilterCb, state: FSMContext) -> None:
     data = await state.get_data()
     filters = dict(data.get("filters", {}))
     field, idx = callback_data.field, callback_data.idx
@@ -206,29 +220,25 @@ async def cb_set(
             filters.pop(dependent, None)
             filters.pop(f"{dependent}_title", None)
     await state.update_data(filters=filters)
-    await _render_panel(call, state, db, settings)
+    await _render_panel(call, state)
     await call.answer()
 
 
 @router.callback_query(kb.FilterCb.filter(F.action == "reset"))
-async def cb_reset(call: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+async def cb_reset(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(filters={})
-    await _render_panel(call, state, db, settings)
+    await _render_panel(call, state)
     await call.answer("Фильтры сброшены")
 
 
 @router.callback_query(kb.FilterCb.filter(F.action == "search"))
-async def cb_search(
-    call: CallbackQuery, state: FSMContext, db: Database, people_parser: PeopleParser, settings: Settings
-) -> None:
+async def cb_search(call: CallbackQuery, state: FSMContext, people_parser: PeopleParser, settings: Settings) -> None:
     filters = (await state.get_data()).get("filters", {})
-    mode = await db.get_mode(call.from_user.id)
     query = SearchQuery(
         collection=filters.get("collection"),
         backdrop=filters.get("backdrop"),
         model=filters.get("model"),
         symbol=filters.get("symbol"),
-        tier=tier_of(mode),
         seed=random.randint(1, 1_000_002),
     )
     await call.answer(texts.PARSING)
@@ -239,7 +249,7 @@ async def cb_search(
         settings,
         query=query,
         header=texts.filters_summary(filters),
-        mode=mode,
+        mode="all",
         back="filters",
         edit=True,
     )

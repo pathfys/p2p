@@ -119,7 +119,7 @@ class Database:
         self.default_gift_ton = default_gift_ton
         self._conn: aiosqlite.Connection | None = None
         self._stats_cache: tuple[float, dict[str, int]] | None = None
-        # save_gifts делает SELECT → INSERT владельца; без блокировки параллельные корутины
+        # save_gifts делает SELECT -> INSERT владельца; без блокировки параллельные корутины
         # (фоновый парсер + живые проверки) могут вставить одного владельца дважды
         self._write_lock = asyncio.Lock()
 

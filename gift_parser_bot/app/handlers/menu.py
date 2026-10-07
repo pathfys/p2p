@@ -1,9 +1,8 @@
-"""/start, главное меню, режимы и «Все подарки»."""
+"""/start, главное меню, «Все подарки», статистика."""
 
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
@@ -25,11 +24,10 @@ async def open_menu(message: Message, user: User, db: Database, crawler: Crawler
     if await db.touch_user(user.id, user.username, user.first_name):
         # Новый пользователь: его NFT-подарки сразу попадают в базу через Bot API getUserGifts
         spawn(crawler.parse_user(user.id, user.username, user.full_name))
-    text = texts.welcome(user.first_name, await db.cached_stats(), crawler.running)
     if edit:
-        await safe_edit(message, text, kb.main_menu())
+        await safe_edit(message, texts.welcome(), kb.main_menu())
     else:
-        await message.answer(text, reply_markup=kb.main_menu())
+        await message.answer(texts.welcome(), reply_markup=kb.main_menu())
 
 
 @router.message(CommandStart())
@@ -41,30 +39,14 @@ async def cmd_start(message: Message, state: FSMContext, db: Database, crawler: 
 @router.callback_query(kb.MenuCb.filter(F.action == "main"))
 async def cb_main(call: CallbackQuery, state: FSMContext, db: Database, crawler: Crawler) -> None:
     await state.set_state(None)
-    text = texts.welcome(call.from_user.first_name, await db.cached_stats(), crawler.running)
-    await safe_edit(call.message, text, kb.main_menu())
+    await open_menu(call.message, call.from_user, db, crawler, edit=True)
     await call.answer()
-
-
-@router.callback_query(kb.ModeCb.filter())
-async def cb_mode(
-    call: CallbackQuery, callback_data: kb.ModeCb, state: FSMContext, db: Database, settings: Settings
-) -> None:
-    """Режим (уровень владельцев) выбирается внутри «Поиск по фильтрам»."""
-    mode = callback_data.mode if callback_data.mode in texts.MODES else "all"
-    await db.set_mode(call.from_user.id, mode)
-    await call.answer(texts.mode_hint(mode, settings))
-    filters = (await state.get_data()).get("filters", {})
-    try:
-        await safe_edit(call.message, texts.filters_panel(filters, mode, settings), kb.filters_panel(filters, mode))
-    except TelegramBadRequest:
-        pass
 
 
 @router.callback_query(kb.MenuCb.filter(F.action == "random"))
 async def cb_random(call: CallbackQuery, state: FSMContext, people_parser: PeopleParser, settings: Settings) -> None:
     """Поток: случайные люди с абсолютно разными подарками, независимо от фильтров и уровня."""
-    await call.answer(f"🎲 {texts.PARSING}")
+    await call.answer(texts.PARSING)
     await run_people(
         call.message,
         state,
@@ -82,4 +64,4 @@ async def cb_random(call: CallbackQuery, state: FSMContext, people_parser: Peopl
 async def cb_stats(call: CallbackQuery, db: Database, crawler: Crawler, settings: Settings) -> None:
     parser = texts.parser_line(crawler.status, crawler.running)
     await safe_edit(call.message, texts.stats_text(await db.cached_stats(ttl=10), settings, parser), kb.back_to_menu())
-    await call.answer("🔄")
+    await call.answer("Обновлено")

@@ -1,4 +1,4 @@
-"""Выдача людей: 10 на странице, «➡️ След. страница» → «⬅️ Назад» и «🔁 Повторить»."""
+"""Выдача людей: 10 на странице, «След. страница» / «Назад» / «Повторить»."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ async def run_people(
     data = await state.get_data()
     shown: list[int] = list(data.get("people_shown", [])) if repeat else []
     if not edit:
-        message = await message.answer(f"👥 <b>{header}</b>\n\n{texts.PARSING}")
+        message = await message.answer(f"<b>{header}</b>\n\n{texts.PARSING}")
 
     result = await people_parser.parse(query, set(shown))
     if repeat and not result.people and shown:  # всех подходящих уже показали — начинаем заново

@@ -85,7 +85,7 @@ def test_rate_limiter_adapts():
 
 def test_rate_limiter_spacing():
     async def main():
-        limiter = RateLimiter("botapi", "fast")  # 25 req/s → 10 запросов ≈ 0.36 с
+        limiter = RateLimiter("botapi", "fast")  # 25 req/s -> 10 запросов ≈ 0.36 с
         loop = asyncio.get_running_loop()
         t0 = loop.time()
         await asyncio.gather(*(limiter.acquire() for _ in range(10)))

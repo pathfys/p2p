@@ -35,10 +35,10 @@ def subscription_line(checker: SubscriptionChecker | None) -> str:
         return "Обязательная подписка: выкл"
     if checker.last_error:
         return (
-            f"Обязательная подписка: {escape(checker.channel)} ⚠️ проверка не работает — сделайте бота "
+            f"Обязательная подписка: {escape(checker.channel)} — проверка не работает, сделайте бота "
             f"администратором канала (<code>{escape(checker.last_error[:200])}</code>)"
         )
-    return f"Обязательная подписка: {escape(checker.channel)} ✅"
+    return f"Обязательная подписка: {escape(checker.channel)} — ок"
 
 
 async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecker | None = None) -> str:
@@ -47,8 +47,8 @@ async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecke
     uptime = f"{(time.time() - st.started_at) / 60:.0f} мин" if st.started_at and crawler.running else "—"
     position = f"{st.collection} — {num(st.position)}/{num(st.issued)}" if st.collection else "—"
     lines = [
-        "⚙️ <b>Панель парсера</b>\n",
-        f"Состояние: <b>{'🟢 работает' if crawler.running else '🔴 остановлен'}</b> · {uptime}",
+        "<b>Панель парсера</b>\n",
+        f"Состояние: <b>{'работает' if crawler.running else 'остановлен'}</b> · {uptime}",
         f"Этап: {escape(st.phase)}",
         f"Коллекция: {escape(position)}",
         f"Страниц: {num(st.pages)} · подарков: {num(st.gifts)} · пусто: {num(st.missing)} · ошибок: {num(st.errors)}",
@@ -59,8 +59,8 @@ async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecke
         f"<b>Скорость: {crawler.preset}</b>",
         *(f"<code>{escape(limiter.describe())}</code>" for limiter in crawler.limiters.values()),
         "",
-        f"База: 🎁 {num(stats['gifts'])} · 👥 {num(stats['owners'])} · 🗂 {num(stats['collections'])} · "
-        f"🙋 {num(stats['users'])}",
+        f"База: подарков {num(stats['gifts'])} · владельцев {num(stats['owners'])} · "
+        f"коллекций {num(stats['collections'])} · юзеров {num(stats['users'])}",
     ]
     if st.last_error:
         lines.append(f"\nПоследняя ошибка: <code>{escape(st.last_error[:300])}</code>")
@@ -94,9 +94,9 @@ async def cb_admin(
         async def sync() -> None:
             try:
                 added, updated = await crawler.sync_collections()
-                await call.message.answer(f"🗂 Новых коллекций: {added}, обновлено floor: {updated}")
+                await call.message.answer(f"Новых коллекций: {added}, обновлено floor: {updated}")
             except Exception as e:
-                await call.message.answer(f"⚠️ Fragment: <code>{escape(repr(e))}</code>")
+                await call.message.answer(f"Fragment: <code>{escape(repr(e))}</code>")
 
         spawn(sync())
     await call.answer(note)
@@ -127,13 +127,13 @@ async def cmd_floor(message: Message, command: CommandObject, db: Database) -> N
         return
     await db.recompute_owners(None)
     await db.conn.commit()
-    await message.answer(f"✅ floor {escape(slug)} = {escape(value)}; режимы владельцев пересчитаны")
+    await message.answer(f"floor {escape(slug)} = {escape(value)}; уровни владельцев пересчитаны")
 
 
 async def cmd_recrawl(message: Message, command: CommandObject, db: Database) -> None:
     slug = (command.args or "").strip().lower()
     if slug and await db.restart_collection(slug):
-        await message.answer(f"🔁 {escape(slug)} будет пропарсена заново с №1")
+        await message.answer(f"{escape(slug)} будет пропарсена заново с №1")
     else:
         await message.answer("Формат: <code>/recrawl plushpepe</code> (коллекция должна быть в базе)")
 
@@ -144,4 +144,4 @@ async def cmd_parse_user(message: Message, command: CommandObject, crawler: Craw
         await message.answer("Формат: <code>/parse_user 123456789</code>")
         return
     count = await crawler.parse_user(int(arg))
-    await message.answer(f"🎁 Найдено NFT-подарков: {count}")
+    await message.answer(f"Найдено NFT-подарков: {count}")

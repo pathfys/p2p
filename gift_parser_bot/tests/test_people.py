@@ -87,9 +87,9 @@ def test_people_keyboard_and_page_text():
     def labels(markup):
         return [[b.text for b in row] for row in markup.inline_keyboard]
 
-    assert labels(people_kb(0, 2, "filters"))[0] == ["➡️ След. страница"]
-    assert labels(people_kb(1, 2, "filters"))[:2] == [["⬅️ Назад"], ["🔁 Повторить"]]
-    assert labels(people_kb(0, 1, "random")) == [["🔁 Повторить"], ["🏠 Меню"]]
+    assert labels(people_kb(0, 2, "filters"))[0] == ["След. страница"]
+    assert labels(people_kb(1, 2, "filters"))[:2] == [["Назад"], ["Повторить"]]
+    assert labels(people_kb(0, 1, "random")) == [["Повторить"], ["Меню"]]
 
     people = [
         {
@@ -112,5 +112,5 @@ def test_people_keyboard_and_page_text():
     ]
     timing = {"seconds": 1.23, "db_seconds": 0.01, "live_seconds": 1.22, "checked": 20, "replaced": 0}
     page2 = people_page("Тест", "all", people, 1, 10, timing)
-    assert "стр. 2/2" in page2 and "11. 👤 @user11" in page2 and "20. 👤 @user20" in page2
-    assert "@user10 " not in page2 and "1.23 с" in page2
+    assert "Страница 2/2" in page2 and "11. @user11 / " in page2 and "20. @user20 / " in page2
+    assert "@user10 /" not in page2 and "1.23 с" in page2
