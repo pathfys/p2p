@@ -1,0 +1,19 @@
+{
+  "name": "p2p-light-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gateway backend for the P2P Light mini-app: WS order-book stream + REST (auth, deals, KYC, subscriptions, top). Zero runtime dependencies.",
+  "type": "module",
+  "engines": { "node": ">=20.11" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "*",
+    "@types/node": "*"
+  }
+}
