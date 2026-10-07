@@ -84,7 +84,6 @@ async def on_text(
     """Любой текст = быстрый поиск (не нужно каждый раз нажимать кнопку)."""
     await state.set_state(None)
     raw = message.text.strip()[:100]
-    mode = await db.get_mode(message.from_user.id)
 
     if slug := normalize_slug(raw):  # ссылка t.me/nft/... или Slug-123 — живой запрос
         try:
@@ -108,7 +107,8 @@ async def on_text(
         await show_results(message, state, db, settings, query, header, "all", edit=False)
         return
 
-    query = SearchQuery(text=raw, tier=tier_of(mode), seed=random.randint(1, 1_000_002))
+    # Быстрый поиск — по всем владельцам; уровень (tier) задаётся в «Поиск по фильтрам».
+    query = SearchQuery(text=raw, seed=random.randint(1, 1_000_002))
     await run_people(
         message,
         state,
@@ -116,7 +116,7 @@ async def on_text(
         settings,
         query=query,
         header=f"«{escape(raw)}»",
-        mode=mode,
+        mode="all",
         back="quick",
         edit=False,
     )

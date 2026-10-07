@@ -29,8 +29,8 @@ class Settings:
 
     # Скорость парсера: slow | normal | fast | auto
     speed: str = "auto"
-    # Запускать парсер сразу при старте бота
-    autostart_parser: bool = False
+    # Запускать парсер сразу при старте бота (по умолчанию да — база наполняется сама)
+    autostart_parser: bool = True
     # Через сколько часов повторно обходить коллекцию / обновлять портфель владельца
     recrawl_hours: int = 24
     # Сколько номеров одной коллекции парсится за один «пакет» (контрольная точка в БД)
@@ -79,7 +79,7 @@ def load_settings() -> Settings:
         admin_ids=_int_set(os.getenv("ADMIN_IDS", "")),
         db_path=Path(db_path) if db_path else Settings.db_path,
         speed=os.getenv("PARSER_SPEED", "auto").strip().lower(),
-        autostart_parser=_bool(os.getenv("PARSER_AUTOSTART"), False),
+        autostart_parser=_bool(os.getenv("PARSER_AUTOSTART"), True),
         recrawl_hours=int(os.getenv("RECRAWL_HOURS", "24")),
         chunk_size=int(os.getenv("CHUNK_SIZE", "50")),
         crawl_min_floor_ton=float(os.getenv("CRAWL_MIN_FLOOR_TON", "0")),

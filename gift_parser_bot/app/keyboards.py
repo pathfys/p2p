@@ -59,15 +59,14 @@ def _mode_row(current: str, src: str) -> list[InlineKeyboardButton]:
     return row
 
 
-def main_menu(mode: str) -> InlineKeyboardMarkup:
-    all_mark = "✅ " if mode == "all" else ""
+def main_menu() -> InlineKeyboardMarkup:
+    # Режимы (Лёгкий/Средний/Rich) — внутри «По фильтрам», чтобы не захламлять меню.
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [_btn("🔍 Быстрый поиск", MenuCb(action="quick"))],
-            [_btn("🎛 По фильтрам", MenuCb(action="filters"))],
-            _mode_row(mode, "menu"),
-            [_btn(f"{all_mark}🎲 Все подарки", MenuCb(action="random"))],
-            [_btn("📊 Статистика", MenuCb(action="stats"))],
+            [_btn("🎛 Поиск по фильтрам", MenuCb(action="filters"))],
+            [_btn("🎲 Все подарки — поток", MenuCb(action="random"))],
+            [_btn("📊 Статистика базы", MenuCb(action="stats"))],
         ]
     )
 

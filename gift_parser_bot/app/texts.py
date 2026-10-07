@@ -41,18 +41,19 @@ def mode_hint(mode: str, s: Settings) -> str:
     }[mode]
 
 
-def welcome(name: str | None, stats: Mapping[str, int]) -> str:
+def welcome(name: str | None, stats: Mapping[str, int], running: bool = True) -> str:
+    parser = "🟢 работает, база растёт в реальном времени" if running else "🔴 остановлен (/admin → запустить)"
     return (
         f"👋 Привет, <b>{escape(name or 'друг')}</b>!\n\n"
-        "🎁 <b>Gift Parser</b> — бот для поиска коллекционных подарков Telegram (NFT) и их владельцев.\n\n"
-        "<b>Что я умею:</b>\n"
-        "🔍 <b>Быстрый поиск</b> — пришлите название подарка, ссылку <code>t.me/nft/…</code> "
-        "или <code>@username</code>\n"
-        "🎛 <b>По фильтрам</b> — подарок, фон, модель и узор\n"
-        "🌱 <b>Лёгкий</b> · ⚖️ <b>Средний</b> · 💎 <b>Rich</b> — уровень владельцев в выдаче\n"
-        "🎲 <b>Все подарки</b> — случайная подборка из всей базы\n\n"
-        f"📦 В базе: <b>{num(stats.get('gifts'))}</b> подарков · <b>{num(stats.get('owners'))}</b> владельцев · "
-        f"<b>{num(stats.get('collections'))}</b> коллекций\n\n"
+        "🎁 <b>Gift Parser</b> — живой парсер коллекционных подарков Telegram (NFT).\n"
+        "Я сам непрерывно обхожу публичные страницы <code>t.me/nft</code> и наполняю базу — "
+        "искать можно сразу, данные подтягиваются на лету.\n\n"
+        f"📦 Сейчас в базе: <b>{num(stats.get('gifts'))}</b> подарков · "
+        f"<b>{num(stats.get('owners'))}</b> владельцев · <b>{num(stats.get('collections'))}</b> коллекций\n"
+        f"⚙️ Парсер: {parser}\n\n"
+        "🔍 <b>Быстрый поиск</b> — название подарка, ссылку <code>t.me/nft/…</code> или <code>@username</code>\n"
+        "🎛 <b>Поиск по фильтрам</b> — подарок, фон, модель, узор + режим (🌱 Лёгкий / ⚖️ Средний / 💎 Rich)\n"
+        "🎲 <b>Все подарки — поток</b> — случайные владельцы с разными подарками\n\n"
         "Выберите действие 👇"
     )
 
@@ -63,11 +64,14 @@ QUICK_PROMPT = (
     "• название подарка, модели, фона или узора — <code>Plush Pepe</code>, <code>Onyx Black</code>\n"
     "• несколько слов сразу — <code>Durov's Cap Black</code>\n"
     "• ссылку на подарок — <code>t.me/nft/PlushPepe-1</code>\n"
-    "• владельца — <code>@username</code>"
+    "• владельца — <code>@username</code>\n\n"
+    "<i>Нужен уровень владельцев (Лёгкий / Средний / Rich) — зайдите в «🎛 Поиск по фильтрам».</i>"
 )
 
 NOTHING_FOUND = (
-    "😔 Ничего не найдено.\n\nПопробуйте другой режим или ослабьте фильтры — база постоянно пополняется парсером."
+    "😔 Пока ничего не найдено.\n\n"
+    "Парсер прямо сейчас наполняет базу — подождите немного и повторите, "
+    "или ослабьте фильтры. Прогресс виден в «📊 Статистика базы»."
 )
 SEARCH_EXPIRED = "Этот поиск устарел — запустите его заново."
 GIFT_NOT_FOUND = "😔 Такого подарка нет: проверьте название и номер в ссылке."
@@ -191,7 +195,18 @@ def picker_title(field: str, page: int, pages: int) -> str:
     return f"{emoji} <b>Выберите: {label.lower()}</b>  (стр. {page + 1}/{pages})"
 
 
-def stats_text(stats: Mapping[str, int], s: Settings) -> str:
+def parser_line(status, running: bool) -> str:
+    if not running:
+        return "⚙️ Парсер: 🔴 остановлен (/admin → ▶️ запустить)"
+    where = (
+        f" · сейчас: {escape(status.collection)} {num(status.position)}/{num(status.issued)}"
+        if status.collection
+        else ""
+    )
+    return f"⚙️ Парсер: 🟢 работает · собрано {num(status.gifts)} за сессию{where}"
+
+
+def stats_text(stats: Mapping[str, int], s: Settings, parser: str) -> str:
     return (
         "📊 <b>Статистика базы</b>\n\n"
         f"🎁 Подарков: <b>{num(stats.get('gifts'))}</b>\n"
@@ -199,6 +214,7 @@ def stats_text(stats: Mapping[str, int], s: Settings) -> str:
         f"    🌱 {num(stats.get('light'))} · ⚖️ {num(stats.get('medium'))} · 💎 {num(stats.get('rich'))}\n"
         f"🗂 Коллекций: <b>{num(stats.get('collections'))}</b>\n"
         f"🙋 Пользователей бота: <b>{num(stats.get('users'))}</b>\n\n"
+        f"{parser}\n\n"
         f"<i>Режимы по оценке всех NFT владельца (floor с Fragment):\n"
         f"🌱 до {num(s.tier_medium_ton)} TON · ⚖️ {num(s.tier_medium_ton)}–{num(s.tier_rich_ton)} TON · "
         f"💎 от {num(s.tier_rich_ton)} TON</i>"

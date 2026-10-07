@@ -1,11 +1,14 @@
-"""Фоновый парсер: наполняет БД подарками и их владельцами.
+"""Фоновый парсер: непрерывно наполняет БД подарками и их владельцами.
 
-Три независимых цикла:
-1. nft_page — обходит все коллекции (список и floor-цены с Fragment) по номерам
-   t.me/nft/<slug>-<n>, сначала самые дорогие. Курсор хранится в БД, поэтому после
-   перезапуска парсинг продолжается с того же места.
-2. botapi — getUserGifts для пользователей бота и найденных отправителей подарков.
-3. mtproto (если настроен) — дообогащает владельцев с @username полным портфелем.
+Запускается сам при старте бота (autostart) и работает постоянно, давая живой
+поток подарков для поиска. Независимые циклы:
+1. nft — обходит коллекции по номерам t.me/nft/<slug>-<n> чанками по кругу
+   (по чуть-чуть из каждой коллекции), чтобы в базе быстро появлялось разнообразие.
+   Курсор каждой коллекции хранится в БД — после перезапуска парсинг продолжается.
+2. fragment — отдельно подтягивает список коллекций и floor-цены (для режимов),
+   не блокируя обход подарков.
+3. botapi — getUserGifts для пользователей бота и найденных отправителей подарков.
+4. mtproto (если настроен) — дообогащает владельцев с @username полным портфелем.
 """
 
 from __future__ import annotations
@@ -95,7 +98,7 @@ class Crawler:
         if self.running:
             return False
         self.status = CrawlStatus(started_at=time.time(), phase="запуск", floors_synced_at=self.status.floors_synced_at)
-        loops = [self._nft_loop, self._botapi_loop]
+        loops = [self._nft_loop, self._fragment_loop, self._botapi_loop]
         if self.mtproto:
             loops.append(self._mtproto_loop)
         self._tasks = [asyncio.create_task(self._guard(loop)) for loop in loops]
@@ -207,62 +210,75 @@ class Crawler:
         return portfolio
 
     # -------------------------------------------------------------------- loops
-    async def _nft_loop(self) -> None:
-        while True:
-            if time.time() - self.status.floors_synced_at > FLOOR_REFRESH_SECONDS:
-                self.status.phase = "синхронизация коллекций и floor (Fragment)"
-                try:
-                    await self.sync_collections()
-                except Exception as e:
-                    self.status.errors += 1
-                    self.status.last_error = f"fragment: {e!r}"
-                    log.warning("Fragment недоступен: %s", e)
-                    if not await self.db.collections():
-                        await self.db.upsert_collections((slug, None) for slug in SEED_COLLECTIONS)
+    async def _ensure_collections(self) -> None:
+        """Чтобы парсеру сразу было что обходить, даже если Fragment ещё не ответил."""
+        if not await self.db.collections():
+            await self.db.upsert_collections((slug, None) for slug in SEED_COLLECTIONS)
 
+    async def _fragment_loop(self) -> None:
+        """Отдельно от обхода подарков: список коллекций и floor-цены (для режимов)."""
+        await self._ensure_collections()
+        while True:
+            try:
+                await self.sync_collections()
+            except Exception as e:
+                self.status.errors += 1
+                self.status.last_error = f"fragment: {e!r}"
+                log.warning("Fragment недоступен: %s", e)
+                await self._ensure_collections()
+                await asyncio.sleep(300)
+                continue
+            await asyncio.sleep(FLOOR_REFRESH_SECONDS)
+
+    async def _nft_loop(self) -> None:
+        """Непрерывный обход t.me/nft. Берём по одному чанку из каждой коллекции по
+        кругу — так в базе быстро появляется разнообразие, а не одна коллекция целиком."""
+        await self._ensure_collections()
+        while True:
             todo = await self.db.collections_to_crawl(
                 now() - self.settings.recrawl_hours * 3600, self.settings.crawl_min_floor_ton
             )
             if not todo:
-                self.status.phase = "ожидание: все коллекции свежие"
+                self.status.phase = "база свежая, жду обновления коллекций"
                 self.status.collection = None
-                await asyncio.sleep(600)
+                await asyncio.sleep(300)
                 continue
             for collection in todo:
-                await self._crawl_collection(collection["slug"], collection["next_number"], collection["issued"] or 0)
+                await self._crawl_chunk(collection["slug"], collection["next_number"], collection["issued"] or 0)
 
-    async def _crawl_collection(self, slug: str, number: int, issued: int) -> None:
+    async def _crawl_chunk(self, slug: str, number: int, issued: int) -> None:
+        """Обходит один чанк (chunk_size номеров) коллекции и двигает курсор в БД."""
         self.status.phase = "парсинг t.me/nft"
         self.status.collection = slug
-        if not issued:
+        if not issued:  # новая коллекция — узнаём тираж по первому подарку
             first = await self._safe_fetch(f"{slug}-1")
             if first:
                 await self.db.save_gifts([first])
+                self.status.gifts += 1
             issued = first.issued if first and first.issued else 0
             if not issued:
                 await self.db.set_cursor(slug, 1, finished=True)
                 return
+            number = max(number, 2)
 
+        end = min(number + self.settings.chunk_size - 1, issued)
+        self.status.position, self.status.issued = number, issued
         semaphore = asyncio.Semaphore(CONCURRENCY[self.preset])
 
         async def one(n: int) -> ParsedGift | None:
             async with semaphore:
                 return await self._safe_fetch(f"{slug}-{n}")
 
-        while number <= issued:
-            end = min(number + self.settings.chunk_size - 1, issued)
-            self.status.position, self.status.issued = number, issued
-            results = await asyncio.gather(*(one(n) for n in range(number, end + 1)))
-            gifts = [g for g in results if g]
-            if gifts:
-                await self.db.save_gifts(gifts)
-                issued = max([issued] + [g.issued or 0 for g in gifts])  # тираж мог вырасти
-            self.status.pages += len(results)
-            self.status.gifts += len(gifts)
-            self.status.missing += len(results) - len(gifts)
-            number = end + 1
-            await self.db.set_cursor(slug, number)
-        await self.db.set_cursor(slug, number, finished=True)
+        results = await asyncio.gather(*(one(n) for n in range(number, end + 1)))
+        gifts = [g for g in results if g]
+        if gifts:
+            await self.db.save_gifts(gifts)
+            issued = max([issued] + [g.issued or 0 for g in gifts])  # тираж мог вырасти
+        self.status.pages += len(results)
+        self.status.gifts += len(gifts)
+        self.status.missing += len(results) - len(gifts)
+        number = end + 1
+        await self.db.set_cursor(slug, number, finished=number > issued)
 
     async def _safe_fetch(self, slug: str) -> ParsedGift | None:
         try:

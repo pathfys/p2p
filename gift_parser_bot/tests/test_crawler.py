@@ -11,7 +11,7 @@ from app.parsers.models import Owner, ParsedGift, Throttled
 from app.ratelimit import RateLimiter
 
 
-def test_crawl_collection_resumes_and_follows_issued(tmp_path, monkeypatch):
+def test_crawl_chunks_round_robin_resume_and_follow_issued(tmp_path, monkeypatch):
     calls: list[str] = []
     throttled_once = {"done": False}
 
@@ -43,7 +43,12 @@ def test_crawl_collection_resumes_and_follows_issued(tmp_path, monkeypatch):
         await crawler.setup()
         try:
             await db.upsert_collections([("pepe", "Pepes")])
-            await crawler._crawl_collection("pepe", number=1, issued=0)
+            # круговой обход: по одному чанку за проход, курсор в БД — пока коллекция не закрыта
+            for _ in range(10):
+                row = (await db.collections())[0]
+                if row["crawled_at"] is not None:
+                    break
+                await crawler._crawl_chunk("pepe", row["next_number"], row["issued"] or 0)
             stats = await db.stats()
             assert stats["gifts"] == 11  # 1..12 без №5
             assert stats["owners"] == 3
