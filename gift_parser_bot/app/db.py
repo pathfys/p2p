@@ -11,6 +11,7 @@ from typing import Iterable
 
 import aiosqlite
 
+from .gender import looks_female
 from .parsers.models import Owner, ParsedGift, Portfolio
 
 SCHEMA = """
@@ -104,6 +105,9 @@ class SearchQuery:
     symbol: str | None = None
     owner: str | None = None  # @username владельца
     tier: str | None = None  # light | medium | rich | None (= все)
+    min_gifts: int | None = None  # владелец имеет не меньше N подарков (фильтр «По NFT»)
+    min_rarity: int | None = None  # редкость модели не хуже N‰ (фильтр «По редкости»)
+    female: bool = False  # только владельцы с женским именем (поиск «Девочки»)
     seed: int = 1  # для стабильного «случайного» порядка между страницами
 
 
@@ -420,6 +424,9 @@ class Database:
             if value:
                 where.append(f"g.{field} = ? COLLATE NOCASE")
                 args.append(value)
+        if q.min_rarity:
+            where.append("g.model_rarity IS NOT NULL AND g.model_rarity <= ?")
+            args.append(q.min_rarity)
         for word in (q.text or "").split():
             like = f"%{word}%"
             where.append(
@@ -460,11 +467,15 @@ class Database:
         if q.tier in TIERS:
             where.append("o.tier = ?")
             args.append(q.tier)
+        if q.min_gifts:
+            where.append("o.gifts_count >= ?")
+            args.append(q.min_gifts)
         if excluded := ",".join(str(int(i)) for i in exclude):
             where.append(f"o.id NOT IN ({excluded})")
         shuffle = f"((o.id * {int(q.seed) % 1000003 or 1}) % 1000003)"
         order = f"o.value_ton DESC, {shuffle}" if q.tier == "rich" else shuffle
         cond = " AND ".join(where)
+        fetch = limit * 8 if q.female else limit  # по имени фильтруем в Python — берём с запасом
         if gift_filtered:
             # bare-колонка g.rowid берётся из строки с MAX(floor) — особенность SQLite
             sql = f"""SELECT o.id AS owner_id, COUNT(*) AS matched, g.rowid AS gift_rowid,
@@ -477,8 +488,11 @@ class Database:
                              (SELECT g.rowid FROM gifts g LEFT JOIN collections c ON c.slug = g.collection
                               WHERE g.owner_id = o.id ORDER BY COALESCE(c.floor_ton, 0) DESC LIMIT 1) AS gift_rowid
                       FROM owners o WHERE {cond} AND o.gifts_count > 0 ORDER BY {order} LIMIT ?"""
-        cur = await self.conn.execute(sql, (*args, limit))
-        return await self._people_rows(list(await cur.fetchall()))
+        cur = await self.conn.execute(sql, (*args, fetch))
+        people = await self._people_rows(list(await cur.fetchall()))
+        if q.female:
+            people = [p for p in people if looks_female(p["o_name"], p["username"])][:limit]
+        return people
 
     async def random_people(self, count: int, *, exclude: Iterable[int] = ()) -> list[dict]:
         """Режим «Все подарки»: случайные люди со случайным подарком, по возможности из разных коллекций."""

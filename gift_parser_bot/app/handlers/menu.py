@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -11,7 +13,7 @@ from .. import keyboards as kb
 from .. import texts
 from ..config import Settings
 from ..crawler import Crawler
-from ..db import Database
+from ..db import Database, SearchQuery
 from ..people import PeopleParser
 from .common import safe_edit, spawn
 from .people_view import run_people
@@ -43,25 +45,19 @@ async def cb_main(call: CallbackQuery, state: FSMContext, db: Database, crawler:
     await call.answer()
 
 
-@router.callback_query(kb.MenuCb.filter(F.action == "random"))
-async def cb_random(call: CallbackQuery, state: FSMContext, people_parser: PeopleParser, settings: Settings) -> None:
-    """Поток: случайные люди с абсолютно разными подарками, независимо от фильтров и уровня."""
+@router.callback_query(kb.MenuCb.filter(F.action == "female"))
+async def cb_female(call: CallbackQuery, state: FSMContext, people_parser: PeopleParser, settings: Settings) -> None:
+    """Поиск «Девочки»: поток владельцев с женским именем (эвристика по имени)."""
     await call.answer(texts.PARSING)
+    query = SearchQuery(female=True, seed=random.randint(1, 1_000_002))
     await run_people(
         call.message,
         state,
         people_parser,
         settings,
-        query=None,
-        header=texts.RANDOM_HEADER,
+        query=query,
+        header=texts.FEMALE_HEADER,
         mode="all",
-        back="random",
+        back="female",
         edit=True,
     )
-
-
-@router.callback_query(kb.MenuCb.filter(F.action == "stats"))
-async def cb_stats(call: CallbackQuery, db: Database, crawler: Crawler, settings: Settings) -> None:
-    parser = texts.parser_line(crawler.status, crawler.running)
-    await safe_edit(call.message, texts.stats_text(await db.cached_stats(ttl=10), settings, parser), kb.back_to_menu())
-    await call.answer("Обновлено")

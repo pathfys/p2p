@@ -50,8 +50,9 @@ class Settings:
     # Выдача людей: по 10 на странице, 2 страницы («След. страница» -> «Назад» / «Повторить»)
     people_per_page: int = 10
     people_pages: int = 2
-    # Перед выдачей проверять каждого человека живым запросом к t.me/nft (актуальный владелец)
-    live_check: bool = True
+    # Перед выдачей проверять каждого человека живым запросом к t.me/nft (актуальный владелец).
+    # По умолчанию выкл: выдача идёт прямо из базы — одинаково быстро для любого режима (~20 человек за 1-2 с).
+    live_check: bool = False
 
     # Обязательная подписка (бот должен быть администратором канала); пусто — без проверки
     required_channel: str | None = "@fiestagod"
@@ -90,7 +91,7 @@ def load_settings() -> Settings:
         results_per_page=int(os.getenv("RESULTS_PER_PAGE", "5")),
         people_per_page=int(os.getenv("PEOPLE_PER_PAGE", "10")),
         people_pages=int(os.getenv("PEOPLE_PAGES", "2")),
-        live_check=_bool(os.getenv("LIVE_CHECK"), True),
+        live_check=_bool(os.getenv("LIVE_CHECK"), False),
         required_channel=os.getenv("REQUIRED_CHANNEL", "@fiestagod").strip() or None,
         api_id=int(api_id) if api_id else None,
         api_hash=os.getenv("API_HASH", "").strip() or None,

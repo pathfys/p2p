@@ -161,6 +161,14 @@ async def cb_page(
     await call.answer()
 
 
+# Фильтры с фиксированным списком вариантов (значение в БД, подпись на кнопке)
+ENUM_OPTIONS: dict[str, list[tuple[str, str]]] = {
+    "tier": [("light", "Low"), ("medium", "Medium"), ("rich", "Rich")],
+    "min_gifts": [("1", "от 1"), ("2", "от 2"), ("5", "от 5"), ("10", "от 10"), ("50", "от 50")],
+    "min_rarity": [("100", "до 10%"), ("30", "до 3%"), ("10", "до 1%"), ("5", "до 0.5%")],
+}
+
+
 # ----------------------------------------------------------- поиск по фильтрам
 async def _render_panel(call: CallbackQuery, state: FSMContext) -> None:
     filters = (await state.get_data()).get("filters", {})
@@ -181,7 +189,9 @@ async def cb_pick(call: CallbackQuery, callback_data: kb.FilterCb, state: FSMCon
         await call.answer()
         return
     filters = (await state.get_data()).get("filters", {})
-    if field == "collection":
+    if field in ENUM_OPTIONS:
+        options = ENUM_OPTIONS[field]
+    elif field == "collection":
         options = [(c["slug"], c["title"] or c["slug"]) for c in await db.collections()]
     else:
         if field in ("model", "symbol") and not filters.get("collection"):
@@ -239,6 +249,9 @@ async def cb_search(call: CallbackQuery, state: FSMContext, people_parser: Peopl
         backdrop=filters.get("backdrop"),
         model=filters.get("model"),
         symbol=filters.get("symbol"),
+        tier=filters.get("tier"),
+        min_gifts=int(filters["min_gifts"]) if filters.get("min_gifts") else None,
+        min_rarity=int(filters["min_rarity"]) if filters.get("min_rarity") else None,
         seed=random.randint(1, 1_000_002),
     )
     await call.answer(texts.PARSING)

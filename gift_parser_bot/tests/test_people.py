@@ -49,7 +49,7 @@ def test_parse_two_pages_replaces_sold_and_repeat_gives_new_people(tmp_path):
     async def scenario(db):
         await db.save_gifts([make_gift(f"pop-{n}", Owner(username=f"user{n}")) for n in range(1, 46)])
         crawler = FakeCrawler(db, sold={"pop-3", "pop-7"})
-        settings = Settings(bot_token="1:x", people_per_page=10, people_pages=2)
+        settings = Settings(bot_token="1:x", people_per_page=10, people_pages=2, live_check=True)
         parser = PeopleParser(db, crawler, settings)
 
         first = await parser.parse(SearchQuery(backdrop="Amber", seed=11))

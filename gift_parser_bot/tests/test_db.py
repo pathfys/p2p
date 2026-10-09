@@ -226,3 +226,40 @@ def test_concurrent_saves_do_not_duplicate_owner(tmp_path):
         assert row["gifts_count"] == 5
 
     run(tmp_path, scenario)
+
+
+def test_filters_min_gifts_min_rarity_and_female(tmp_path):
+    async def scenario(db):
+        await db.upsert_collections([("pepe", "Pepes")])
+        await db.set_floor("pepe", 50)
+        gifts = [
+            gift("pepe-1", Owner(username="whale", name="Анна"), model="Rare"),
+            gift("pepe-2", Owner(username="whale", name="Анна"), model="Rare"),
+            gift("pepe-3", Owner(username="whale", name="Анна"), model="Rare"),
+            gift("pepe-4", Owner(username="bob", name="Борис"), model="Common"),
+            gift("pepe-5", Owner(username="kate", name="Катя"), model="Common"),
+        ]
+        gifts[0].model_rarity = 10  # 1% — очень редкая
+        gifts[3].model_rarity = 300  # 30% — частая
+        gifts[4].model_rarity = 50  # 5%
+        await db.save_gifts(gifts)
+
+        # По NFT: владелец с >=3 подарками
+        rows = await db.search_people(SearchQuery(min_gifts=3), limit=10)
+        assert [r["username"] for r in rows] == ["whale"]
+
+        # По редкости: модель не хуже 1% (<=10 промилле)
+        rows = await db.search_people(SearchQuery(min_rarity=10), limit=10)
+        assert {r["username"] for r in rows} == {"whale"}
+        rows = await db.search_people(SearchQuery(min_rarity=100), limit=10)  # <=10%
+        assert {r["username"] for r in rows} == {"whale", "kate"}
+
+        # Девочки: только женские имена (whale=Анна, kate=Катя; bob=Борис — нет)
+        rows = await db.search_people(SearchQuery(female=True), limit=10)
+        assert {r["username"] for r in rows} == {"whale", "kate"}
+
+        # Комбинация фильтров (whale: 3 подарка x 50 TON = 150 TON -> medium при порогах 30/300)
+        rows = await db.search_people(SearchQuery(collection="pepe", tier="medium", min_gifts=2), limit=10)
+        assert [r["username"] for r in rows] == ["whale"]
+
+    run(tmp_path, scenario)

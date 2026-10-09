@@ -55,8 +55,7 @@ def main_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [_btn("Быстрый поиск", MenuCb(action="quick"))],
             [_btn("Поиск по фильтрам", MenuCb(action="filters"))],
-            [_btn("Все подарки", MenuCb(action="random"))],
-            [_btn("Статистика", MenuCb(action="stats"))],
+            [_btn("Девочки", MenuCb(action="female"))],
         ]
     )
 
@@ -88,6 +87,8 @@ def filters_panel(filters: dict) -> InlineKeyboardMarkup:
             [field_btn("collection")],
             [field_btn("backdrop")],
             [field_btn("model"), field_btn("symbol")],
+            [field_btn("tier"), field_btn("min_gifts")],
+            [field_btn("min_rarity")],
             [_btn("Найти", FilterCb(action="search"))],
             [_btn("Сбросить", FilterCb(action="reset")), _btn("Меню", MenuCb(action="main"))],
         ]
