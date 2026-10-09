@@ -73,7 +73,13 @@ def parse_nft_html(slug: str, page: str) -> ParsedGift | None:
 
 
 async def fetch_nft(session: aiohttp.ClientSession, slug: str) -> ParsedGift | None:
-    """Скачивает и разбирает страницу. None — такого номера нет (или он сожжён)."""
+    """Скачивает и разбирает страницу.
+
+    None — такого номера нет (редирект/404, т.е. подарок не существует или сожжён).
+    Если страница отдалась (200), но карточки подарка в ней нет — это НЕ «подарка нет»,
+    а троттлинг t.me (служебный ответ под нагрузкой): кидаем Throttled, чтобы лимитер
+    притормозил и запрос повторился, а не чтобы коллекцию посчитали пустой.
+    """
     async with session.get(NFT_URL.format(slug=slug), allow_redirects=False) as resp:
         if resp.status in (301, 302, 303, 404):
             return None
@@ -82,4 +88,7 @@ async def fetch_nft(session: aiohttp.ClientSession, slug: str) -> ParsedGift | N
             raise Throttled(float(retry) if retry and retry.isdigit() else None)
         resp.raise_for_status()
         page = await resp.text()
-    return parse_nft_html(slug, page)
+    gift = parse_nft_html(slug, page)
+    if gift is None:
+        raise Throttled(None)
+    return gift

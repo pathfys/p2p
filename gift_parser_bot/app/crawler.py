@@ -38,6 +38,10 @@ T = TypeVar("T")
 
 FLOOR_REFRESH_SECONDS = 6 * 3600
 
+# Результат _safe_fetch, когда страницу не удалось получить (троттлинг/сеть), а НЕ «подарка нет».
+# Такой номер нельзя считать отсутствующим и проскакивать курсором — повторим его позже.
+_TRANSIENT: object = object()
+
 
 @dataclass
 class CrawlStatus:
@@ -120,7 +124,8 @@ class Crawler:
         self.preset = preset
 
     async def _guard(self, loop: Callable[[], Awaitable[None]]) -> None:
-        """Цикл не должен умирать от случайной ошибки (сеть, БД) — перезапускаем через 30 с."""
+        """Цикл не должен умирать от случайной ошибки (сеть, БД) — перезапускаем через 30 с.
+        И не должен крутиться вхолостую, если вдруг вернулся сам — тогда ждём перед рестартом."""
         while True:
             try:
                 await loop()
@@ -131,6 +136,9 @@ class Crawler:
                 self.status.errors += 1
                 self.status.last_error = repr(e)
                 await asyncio.sleep(30)
+            else:
+                # штатно циклы бесконечны; если один завершился — пауза, чтобы не было busy-loop
+                await asyncio.sleep(5)
 
     # ------------------------------------------------------------------ helpers
     @property
@@ -138,22 +146,28 @@ class Crawler:
         assert self._session is not None, "Crawler.setup() не вызван"
         return self._session
 
-    async def _call(self, source: str, func: Callable[..., Awaitable[T]], *args) -> T:
-        """Запрос через лимитер источника: пауза на 429 и до 3 повторов при сетевых ошибках."""
+    async def _call(self, source: str, func: Callable[..., Awaitable[T]], *args, max_throttles: int = 5) -> T:
+        """Запрос через лимитер источника: пауза на 429 и ограниченное число повторов.
+        Повторы ограничены (и для сетевых ошибок, и для троттлинга), чтобы один «залипший»
+        ответ не крутился в бесконечном цикле. max_throttles=1 — для быстрых ответов пользователю."""
         limiter = self.limiters[source]
-        attempt = 0
+        net_attempts = 0
+        throttles = 0
         while True:
             await limiter.acquire()
             try:
                 result = await func(*args)
             except Throttled as e:
+                throttles += 1
                 limiter.on_throttle(e.retry_after)
+                if throttles >= max_throttles:
+                    raise
                 continue
             except (aiohttp.ClientError, asyncio.TimeoutError):
-                attempt += 1
-                if attempt >= 3:
+                net_attempts += 1
+                if net_attempts >= 3:
                     raise
-                await asyncio.sleep(2**attempt)
+                await asyncio.sleep(2**net_attempts)
                 continue
             limiter.on_success()
             return result
@@ -179,8 +193,9 @@ class Crawler:
             return added, updated
 
     async def fetch_gift(self, slug: str) -> ParsedGift | None:
-        """Живой запрос одного подарка в ответ пользователю (свой лимитер, не ждёт фоновый парсер)."""
-        gift = await self._call("live", fetch_nft, self.session, slug)
+        """Живой запрос одного подарка в ответ пользователю. max_throttles=1 — чтобы не держать
+        пользователя: при троттлинге сразу падаем, а вызывающий код показывает данные из базы."""
+        gift = await self._call("live", fetch_nft, self.session, slug, max_throttles=1)
         if gift:
             await self.db.save_gifts([gift])
         return gift
@@ -243,50 +258,77 @@ class Crawler:
                 self.status.collection = None
                 await asyncio.sleep(300)
                 continue
+            before = self.status.gifts
             for collection in todo:
                 await self._crawl_chunk(collection["slug"], collection["next_number"], collection["issued"] or 0)
+            if self.status.gifts == before:
+                # за весь проход ни одного подарка — t.me троттлит/недоступен, не долбим его впустую
+                self.status.phase = "троттлинг t.me, пауза перед повтором"
+                await asyncio.sleep(60)
 
     async def _crawl_chunk(self, slug: str, number: int, issued: int) -> None:
         """Обходит один чанк (chunk_size номеров) коллекции и двигает курсор в БД."""
         self.status.phase = "парсинг t.me/nft"
         self.status.collection = slug
-        if not issued:  # новая коллекция — узнаём тираж по первому подарку
-            first = await self._safe_fetch(f"{slug}-1")
-            if first:
-                await self.db.save_gifts([first])
-                self.status.gifts += 1
-            issued = first.issued if first and first.issued else 0
+        if not issued:  # новая коллекция — узнаём тираж по первым подаркам
+            # пробуем вразброс: вдруг первые номера сожжены/редиректят, но коллекция живая
+            first = None
+            for probe in (1, 2, 3, 5, 10, 25, 50):
+                try:
+                    g = await self._call("nft_page", fetch_nft, self.session, f"{slug}-{probe}")
+                except Exception as e:
+                    # транзиент/троттлинг — НЕ финишируем, повторим в следующий проход,
+                    # иначе сбой/нагрузка «похоронили» бы коллекцию до следующего recrawl
+                    self.status.errors += 1
+                    self.status.last_error = f"{slug}-{probe}: {e!r}"
+                    return
+                if g is not None:
+                    first = g
+                    break
+            if first is None:  # ни один пробный номер не существует — пустой/битый slug
+                await self.db.set_cursor(slug, 1, finished=True)
+                return
+            await self.db.save_gifts([first])
+            self.status.gifts += 1
+            issued = first.issued or 0
             if not issued:
                 await self.db.set_cursor(slug, 1, finished=True)
                 return
-            number = max(number, 2)
+            number = max(number, first.number + 1)
 
         end = min(number + self.settings.chunk_size - 1, issued)
         self.status.position, self.status.issued = number, issued
         semaphore = asyncio.Semaphore(CONCURRENCY[self.preset])
 
-        async def one(n: int) -> ParsedGift | None:
+        async def one(n: int) -> object:
             async with semaphore:
                 return await self._safe_fetch(f"{slug}-{n}")
 
         results = await asyncio.gather(*(one(n) for n in range(number, end + 1)))
-        gifts = [g for g in results if g]
+        gifts = [r for r in results if isinstance(r, ParsedGift)]
         if gifts:
             await self.db.save_gifts(gifts)
             issued = max([issued] + [g.issued or 0 for g in gifts])  # тираж мог вырасти
         self.status.pages += len(results)
         self.status.gifts += len(gifts)
-        self.status.missing += len(results) - len(gifts)
-        number = end + 1
-        await self.db.set_cursor(slug, number, finished=number > issued)
+        self.status.missing += sum(1 for r in results if r is None)
+        # первый недокачанный (троттлинг/сеть) номер: курсор ставим на успешный префикс,
+        # чтобы повторить именно его, а не «проскочить» подарок как отсутствующий
+        first_transient = next((i for i, r in enumerate(results) if r is _TRANSIENT), None)
+        if first_transient is None:
+            number = end + 1
+            await self.db.set_cursor(slug, number, finished=number > issued)
+        else:
+            await self.db.set_cursor(slug, number + first_transient)
 
-    async def _safe_fetch(self, slug: str) -> ParsedGift | None:
+    async def _safe_fetch(self, slug: str) -> object:
+        """ParsedGift — подарок есть; None — подарка нет (редирект); _TRANSIENT — не докачали."""
         try:
             return await self._call("nft_page", fetch_nft, self.session, slug)
         except Exception as e:
             self.status.errors += 1
             self.status.last_error = f"{slug}: {e!r}"
-            return None
+            return _TRANSIENT
 
     async def _botapi_loop(self) -> None:
         semaphore = asyncio.Semaphore(CONCURRENCY[self.preset])

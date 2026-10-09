@@ -92,3 +92,79 @@ def test_rate_limiter_spacing():
         return loop.time() - t0
 
     assert asyncio.run(main()) >= 0.3
+
+
+def test_discovery_transient_error_does_not_finish_collection(tmp_path, monkeypatch):
+    async def main():
+        settings = Settings(bot_token="1:x", db_path=tmp_path / "d.db", speed="slow")
+        db = Database(settings.db_path, medium_ton=10, rich_ton=100, default_gift_ton=3)
+        await db.connect()
+        crawler = Crawler(db, settings, Bot("123:abc"))
+        await crawler.setup()
+        try:
+            await db.upsert_collections([("pepe", "Pepes")])
+
+            # 1) транзиентная ошибка на #1 -> коллекция НЕ финишируется, курсор на месте
+            async def boom(session, slug):
+                raise RuntimeError("network down")
+
+            monkeypatch.setattr(crawler_module, "fetch_nft", boom)
+            await crawler._crawl_chunk("pepe", number=1, issued=0)
+            row = (await db.collections())[0]
+            assert row["crawled_at"] is None and row["next_number"] == 1
+
+            # 2) #1 реально отсутствует (None) -> коллекция финишируется (битый/пустой slug)
+            async def missing(session, slug):
+                return None
+
+            monkeypatch.setattr(crawler_module, "fetch_nft", missing)
+            await crawler._crawl_chunk("pepe", number=1, issued=0)
+            row = (await db.collections())[0]
+            assert row["crawled_at"] is not None
+        finally:
+            await crawler.shutdown()
+            await db.close()
+
+    asyncio.run(main())
+
+
+def test_chunk_does_not_skip_throttled_editions(tmp_path, monkeypatch):
+    """Троттлинг в теле чанка не должен «проскакивать» подарок как отсутствующий:
+    курсор останавливается на первом недокачанном номере, коллекция не финишируется."""
+
+    async def main():
+        settings = Settings(bot_token="1:x", db_path=tmp_path / "t.db", chunk_size=5, speed="fast")
+        db = Database(settings.db_path, medium_ton=10, rich_ton=100, default_gift_ton=3)
+        await db.connect()
+        crawler = Crawler(db, settings, Bot("123:abc"))
+        await crawler.setup()
+        try:
+            await db.upsert_collections([("c", "C")])
+
+            async def fetch(session, slug):
+                n = int(slug.rsplit("-", 1)[1])
+                if n == 2:
+                    raise Throttled(0.001)  # всегда троттлит -> _call сдастся -> _TRANSIENT
+                if n == 4:
+                    return None  # реально отсутствует (редирект)
+                return ParsedGift(
+                    slug=slug, title="C", number=n, backdrop="Amber", issued=10, owner=Owner(username=f"u{n}")
+                )
+
+            monkeypatch.setattr(crawler_module, "fetch_nft", fetch)
+            await crawler._crawl_chunk("c", number=1, issued=10)  # issued известен -> без discovery
+
+            row = (await db.collections())[0]
+            # ключевой инвариант: курсор НЕ проскочил троттленный #2 — встал на него и не финишировал,
+            # значит на следующем проходе #2 будет повторён, а не потерян как «отсутствующий»
+            assert row["next_number"] == 2 and row["crawled_at"] is None
+            # успешные номера сохранены; #2 (троттл) и #4 (редирект=нет) — нет
+            cur = await db.conn.execute("SELECT slug FROM gifts ORDER BY number")
+            saved = [r[0] for r in await cur.fetchall()]
+            assert saved == ["c-1", "c-3", "c-5"] and "c-2" not in saved and "c-4" not in saved
+            assert crawler.limiters["nft_page"].stats.throttled >= 1
+        finally:
+            await crawler.shutdown()
+            await db.close()
+
+    asyncio.run(main())

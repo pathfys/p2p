@@ -1,9 +1,12 @@
 """Выдача «людей»: 10 человек на странице, 2 страницы, кнопка «Повторить».
 
-Один «парсинг» = подобрать 20 человек (Telegram-аккаунтов) под запрос из базы и
-проверить каждого живым запросом к его странице t.me/nft: подарок всё ещё у него?
-Кто подарок уже продал/вывел — заменяется следующим кандидатом. Время каждого этапа
-замеряется и показывается в выдаче.
+Один «парсинг» = подобрать 20 человек (Telegram-аккаунтов) под запрос из базы.
+По умолчанию берём прямо из базы (одинаково быстро для любого режима). Если включён
+LIVE_CHECK — каждого дополнительно проверяем живым запросом к его странице t.me/nft
+(подарок всё ещё у него?), и выбывших заменяем следующими кандидатами.
+
+Между раундами добора меняем seed запроса, чтобы не перечитывать те же строки и не
+застревать, когда часть кандидатов отсеивается (например, в поиске «Девочки»).
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .config import Settings
 from .crawler import Crawler
@@ -70,7 +73,7 @@ class PeopleParser:
         result = ParseResult()
         started = time.perf_counter()
         seen = set(exclude or ())
-        for _ in range(MAX_ROUNDS):
+        for round_no in range(MAX_ROUNDS):
             missing = self.need - len(result.people)
             if missing <= 0:
                 break
@@ -78,7 +81,10 @@ class PeopleParser:
             if query is None:
                 candidates = await self.db.random_people(missing, exclude=seen)
             else:
-                candidates = await self.db.search_people(query, limit=missing, exclude=seen)
+                # разный seed на каждом раунде: иначе ORDER BY выдаёт те же строки,
+                # а при пост-фильтре (пол) добор не двигается с места
+                q = replace(query, seed=(query.seed + round_no * 7919) % 1000003 or 1)
+                candidates = await self.db.search_people(q, limit=missing, exclude=seen)
             result.db_seconds += time.perf_counter() - t
             if not candidates:
                 break

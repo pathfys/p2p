@@ -114,3 +114,30 @@ def test_people_keyboard_and_page_text():
     page2 = people_page("Тест", "all", people, 1, 10, timing)
     assert "Страница 2/2" in page2 and "11. @user11 / " in page2 and "20. @user20 / " in page2
     assert "@user10 /" not in page2 and "1.23 с" in page2
+
+
+def test_female_search_progresses_across_rounds(tmp_path):
+    """Пост-фильтр по полу не должен застревать: смена seed между раундами добирает всех девочек."""
+
+    async def main():
+        db = Database(tmp_path / "f.db", medium_ton=10, rich_ton=100, default_gift_ton=3)
+        await db.connect()
+        try:
+            gifts = []
+            for i in range(1, 16):  # 15 женских
+                gifts.append(make_gift(f"pop-{i}", Owner(user_id=1000 + i, name="Анна")))
+            for i in range(16, 61):  # 45 мужских/нейтральных
+                gifts.append(make_gift(f"pop-{i}", Owner(user_id=2000 + i, name="Борис")))
+            await db.save_gifts(gifts)
+
+            settings = Settings(bot_token="1:x", people_per_page=10, people_pages=2, live_check=False)
+            parser = PeopleParser(db, FakeCrawler(db, sold=set()), settings)
+            res = await parser.parse(SearchQuery(female=True, seed=1))
+            names = {p["o_name"] for p in res.people}
+            assert names == {"Анна"}  # только девочки
+            assert len(res.people) == 15  # добрал всех, несмотря на пост-фильтр и раунды
+            assert len({p["owner_id"] for p in res.people}) == 15  # без повторов
+        finally:
+            await db.close()
+
+    asyncio.run(main())
