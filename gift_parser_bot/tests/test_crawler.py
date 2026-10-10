@@ -6,7 +6,7 @@ from aiogram import Bot
 from app import crawler as crawler_module
 from app.config import Settings
 from app.crawler import Crawler
-from app.db import Database
+from app.db import Database, SearchQuery
 from app.parsers.models import Owner, ParsedGift, Throttled
 from app.ratelimit import RateLimiter
 
@@ -189,6 +189,60 @@ def test_chunk_does_not_skip_throttled_editions(tmp_path, monkeypatch):
             saved = [r[0] for r in await cur.fetchall()]
             assert saved == ["c-1", "c-3", "c-5"] and "c-2" not in saved and "c-4" not in saved
             assert crawler.limiters["nft_page"].stats.throttled >= 1
+        finally:
+            await crawler.shutdown()
+            await db.close()
+
+    asyncio.run(main())
+
+
+def test_crawl_uses_mtproto_and_fills_owners(tmp_path, monkeypatch):
+    """Со страницы t.me владельца не узнать, поэтому при живой сессии подарки должны
+    качаться через MTProto — и приходить сразу с @username."""
+
+    class FakeMtproto:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        async def fetch_unique(self, slug):
+            self.calls.append(slug)
+            n = int(slug.rsplit("-", 1)[1])
+            if n > 3:
+                return None  # номера нет
+            return ParsedGift(
+                slug=slug,
+                title="C",
+                number=n,
+                backdrop="Amber",
+                issued=3,
+                owner=Owner(user_id=100 + n, username=f"u{n}"),
+                source="mtproto",
+            )
+
+        async def stop(self):
+            pass
+
+    async def must_not_be_used(session, slug):
+        raise AssertionError("при живой сессии t.me/nft использоваться не должен")
+
+    async def main():
+        settings = Settings(bot_token="1:x", db_path=tmp_path / "m.db", chunk_size=10, speed="fast")
+        db = Database(settings.db_path, medium_ton=10, rich_ton=100, default_gift_ton=3)
+        await db.connect()
+        crawler = Crawler(db, settings, Bot("123:abc"))
+        await crawler.setup()
+        monkeypatch.setattr(crawler_module, "fetch_nft", must_not_be_used)
+        crawler.mtproto = FakeMtproto()
+        try:
+            await db.upsert_collections([("c", "C")])
+            await crawler._crawl_chunk("c", number=1, issued=0)  # тираж неизвестен -> discovery
+
+            stats = await db.stats()
+            assert stats["gifts"] == 3  # #1 из discovery + #2,#3 из чанка
+            assert stats["owners_named"] == 3 and stats["hidden_gifts"] == 0
+            people = await db.search_people(SearchQuery(seed=1), limit=10)
+            assert {p["username"] for p in people} == {"u1", "u2", "u3"}
+            assert crawler.limiters["nft_page"].stats.requests == 0  # t.me не трогали
         finally:
             await crawler.shutdown()
             await db.close()

@@ -270,14 +270,15 @@ class Crawler:
 
     async def _crawl_chunk(self, slug: str, number: int, issued: int) -> None:
         """Обходит один чанк (chunk_size номеров) коллекции и двигает курсор в БД."""
-        self.status.phase = "парсинг t.me/nft"
+        self.status.phase = "парсинг MTProto" if self.mtproto else "парсинг t.me/nft"
         self.status.collection = slug
         if not issued:  # новая коллекция — узнаём тираж по первым подаркам
             # пробуем вразброс: вдруг первые номера сожжены/редиректят, но коллекция живая
             first = None
             for probe in (1, 2, 3, 5, 10, 25, 50):
                 try:
-                    g = await self._call("nft_page", fetch_nft, self.session, f"{slug}-{probe}")
+                    g = await self._fetch_one(f"{slug}-{probe}")
+                    self.status.pages += 1
                 except Throttled:
                     # троттлинг t.me — это НЕ ошибка, а бэкпрешер: не финишируем, повторим позже
                     self.status.throttled += 1
@@ -331,10 +332,22 @@ class Crawler:
         else:
             await self.db.set_cursor(slug, number + first_transient)
 
+    async def _fetch_one(self, slug: str) -> ParsedGift | None:
+        """Один NFT из лучшего доступного источника.
+
+        Если подключён MTProto — берём оттуда: payments.getUniqueStarGift отдаёт и сам
+        подарок, и ВЛАДЕЛЬЦА (@username/user_id), и тираж, и почти не троттлится.
+        Публичная страница t.me/nft владельца больше не содержит и жёстко лимитируется
+        по IP, поэтому она — запасной вариант, когда сессии нет.
+        """
+        if self.mtproto:
+            return await self.mtproto.fetch_unique(slug)
+        return await self._call("nft_page", fetch_nft, self.session, slug)
+
     async def _safe_fetch(self, slug: str) -> object:
         """ParsedGift — подарок есть; None — подарка нет (редирект); _TRANSIENT — не докачали."""
         try:
-            return await self._call("nft_page", fetch_nft, self.session, slug)
+            return await self._fetch_one(slug)
         except Throttled:
             self.status.throttled += 1  # бэкпрешер t.me — не ошибка, повторим позже
             return _TRANSIENT
