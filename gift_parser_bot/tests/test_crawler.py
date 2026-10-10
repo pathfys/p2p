@@ -5,7 +5,7 @@ from aiogram import Bot
 
 from app import crawler as crawler_module
 from app.config import Settings
-from app.crawler import Crawler
+from app.crawler import Crawler, shuffled_numbers
 from app.db import Database, SearchQuery
 from app.parsers.models import Owner, ParsedGift, Throttled
 from app.ratelimit import RateLimiter
@@ -53,9 +53,8 @@ def test_crawl_chunks_round_robin_resume_and_follow_issued(tmp_path, monkeypatch
             assert stats["gifts"] == 11  # 1..12 без №5
             assert stats["owners"] == 3
             row = (await db.collections())[0]
-            # курсор — смещение внутри шага: тираж 12 при chunk_size=4 даёт stride=3,
-            # значит после 3 проходов (смещения 1,2,3) коллекция закрыта
-            assert row["next_number"] == 4 and row["crawled_at"] is not None and row["issued"] == 12
+            # курсор — индекс в перестановке: тираж 12 пройден целиком, коллекция закрыта
+            assert row["next_number"] == 13 and row["crawled_at"] is not None and row["issued"] == 12
             assert calls.count("pepe-3") == 2
             assert crawler.limiters["nft_page"].stats.throttled == 1
         finally:
@@ -169,13 +168,16 @@ def test_chunk_does_not_skip_throttled_editions(tmp_path, monkeypatch):
         try:
             await db.upsert_collections([("c", "C")])
 
-            # тираж 10 при chunk_size=5 даёт stride=2, значит проход со смещением 1
-            # берёт вразброс номера 1, 3, 5, 7, 9
+            # номера идут в случайном порядке — берём их из той же перестановки,
+            # чтобы «сломать» именно те, что реально попадут в проход
+            planned, _ = shuffled_numbers("c", 10, 0, 5)
+            throttled_n, missing_n = planned[1], planned[3]
+
             async def fetch(session, slug):
                 n = int(slug.rsplit("-", 1)[1])
-                if n == 3:
+                if n == throttled_n:
                     raise Throttled(0.001)  # всегда троттлит -> _call сдастся -> _TRANSIENT
-                if n == 7:
+                if n == missing_n:
                     return None  # реально отсутствует (редирект)
                 return ParsedGift(
                     slug=slug, title="C", number=n, backdrop="Amber", issued=10, owner=Owner(username=f"u{n}")
@@ -185,13 +187,13 @@ def test_chunk_does_not_skip_throttled_editions(tmp_path, monkeypatch):
             await crawler._crawl_chunk("c", number=1, issued=10)  # issued известен -> без discovery
 
             row = (await db.collections())[0]
-            # ключевой инвариант: из-за недокачанного #3 смещение НЕ сдвинулось и коллекция
-            # не закрыта — проход повторится, и #3 будет перезапрошен, а не потерян
+            # ключевой инвариант: из-за недокачанного номера курсор НЕ сдвинулся и коллекция
+            # не закрыта — проход повторится, и этот номер будет перезапрошен, а не потерян
             assert row["next_number"] == 1 and row["crawled_at"] is None
-            # успешные номера прохода сохранены; #3 (троттл) и #7 (редирект=нет) — нет
-            cur = await db.conn.execute("SELECT slug FROM gifts ORDER BY number")
-            saved = [r[0] for r in await cur.fetchall()]
-            assert saved == ["c-1", "c-5", "c-9"] and "c-3" not in saved and "c-7" not in saved
+            # успешные номера прохода сохранены; троттленный и отсутствующий — нет
+            cur = await db.conn.execute("SELECT number FROM gifts")
+            saved = sorted(r[0] for r in await cur.fetchall())
+            assert saved == sorted(set(planned) - {throttled_n, missing_n})
             assert crawler.limiters["nft_page"].stats.throttled >= 1
         finally:
             await crawler.shutdown()
@@ -254,10 +256,10 @@ def test_crawl_uses_mtproto_and_fills_owners(tmp_path, monkeypatch):
     asyncio.run(main())
 
 
-def test_scattered_crawl_spreads_and_covers_everything(tmp_path, monkeypatch):
-    """Номера берутся вразброс по тиражу (а не подряд с №1, где сидят призовые
-    экземпляры со скрытыми владельцами), но за stride проходов тираж покрывается
-    целиком — без пропусков и без повторных скачиваний."""
+def test_random_order_crawl_covers_everything(tmp_path, monkeypatch):
+    """Номера берутся в случайном порядке (а не подряд с №1, где сидят призовые
+    экземпляры со скрытыми владельцами), но тираж всё равно покрывается целиком —
+    без пропусков и без повторных скачиваний."""
     fetched: list[int] = []
 
     async def fake_fetch(session, slug):
@@ -277,11 +279,14 @@ def test_scattered_crawl_spreads_and_covers_everything(tmp_path, monkeypatch):
         try:
             await db.upsert_collections([("c", "C")])
 
-            # первый проход: номера размазаны по всему тиражу, а не 1..50
+            # первый проход: номера случайные и разбросаны по всему тиражу, а не 1..50
             await crawler._crawl_chunk("c", number=1, issued=1000)
-            first_pass = sorted(fetched)
-            assert first_pass[0] == 1 and first_pass[-1] > 900, first_pass[:5]
-            assert len(first_pass) == 50 and len(set(first_pass)) == 50
+            first_pass = list(fetched)
+            assert first_pass != sorted(first_pass)  # порядок не возрастающий — перемешан
+            assert sorted(first_pass) != list(range(1, 51))  # это не «голова» коллекции
+            assert max(first_pass) > 500 and len(set(first_pass)) == 50
+            steps = {b - a for a, b in zip(sorted(first_pass), sorted(first_pass)[1:], strict=False)}
+            assert len(steps) > 5, steps  # нет постоянного шага, как было бы у stride
 
             # докручиваем остальные проходы, пока коллекция не закроется
             for _ in range(60):

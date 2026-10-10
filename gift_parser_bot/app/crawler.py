@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -41,6 +42,46 @@ FLOOR_REFRESH_SECONDS = 6 * 3600
 # Результат _safe_fetch, когда страницу не удалось получить (троттлинг/сеть), а НЕ «подарка нет».
 # Такой номер нельзя считать отсутствующим и проскакивать курсором — повторим его позже.
 _TRANSIENT: object = object()
+
+
+def _feistel(value: int, bits: int, seed: int) -> int:
+    """Обратимо перемешивает число в диапазоне 0..2**bits-1 (сеть Фейстеля)."""
+    half = bits // 2
+    mask = (1 << half) - 1
+    left, right = (value >> half) & mask, value & mask
+    for round_no in range(4):
+        digest = hashlib.sha256(f"{seed}:{round_no}:{right}".encode()).digest()
+        left, right = right, left ^ (int.from_bytes(digest[:8], "big") & mask)
+    return (left << half) | right
+
+
+def _permute(index: int, issued: int, seed: int) -> int:
+    """index -> номер подарка 1..issued. Биекция: каждый индекс даёт свой номер."""
+    bits = max(2, (issued - 1).bit_length())
+    bits += bits % 2  # сеть Фейстеля делит число пополам
+    value = index
+    for _ in range(64):  # cycle walking: выходы за пределы тиража перемешиваем ещё раз
+        value = _feistel(value, bits, seed)
+        if value < issued:
+            return value + 1
+    return value % issued + 1  # недостижимо на практике, но лучше чем зависнуть
+
+
+def shuffled_numbers(slug: str, issued: int, start: int, count: int) -> tuple[list[int], int]:
+    """Случайный порядок номеров 1..issued без повторов.
+
+    Подряд с №1 идут призовые и статусные экземпляры, владельцы которых почти всегда
+    скрыты, поэтому номера перемешиваем. Перестановка строится шифром (Фейстель), а не
+    линейной формулой, иначе между соседними номерами был бы постоянный шаг — тот же
+    последовательный обход, только с другим интервалом.
+
+    Порядок выводится из названия коллекции, поэтому не меняется между перезапусками:
+    хватает одного курсора — индекса в перестановке. Возвращает (номера, следующий индекс).
+    """
+    seed = int(hashlib.sha1(slug.encode()).hexdigest()[:12], 16)
+    index = max(start, 0)
+    numbers = [_permute(i, issued, seed) for i in range(index, min(index + count, issued))]
+    return numbers, index + len(numbers)
 
 
 @dataclass
@@ -325,15 +366,11 @@ class Crawler:
                 return
             number = max(number, 1)
 
-        # Берём номера НЕ подряд, а вразброс по всему тиражу: подряд с №1 идут призовые
-        # и статусные экземпляры, владельцы которых почти всегда скрыты. Шаг подобран так,
-        # чтобы за один проход получить ~chunk_size номеров, равномерно размазанных по тиражу.
-        # Курсор теперь — смещение внутри шага (1..stride); за stride проходов покрывается
-        # весь тираж без пропусков, потому что любой n = offset + k * stride ровно один раз.
-        stride = max(1, -(-issued // self.settings.chunk_size))
-        offset = min(max(number, 1), stride)
-        numbers = list(range(offset, issued + 1, stride))[: self.settings.chunk_size]
-        self.status.position, self.status.issued = offset, issued
+        # Номера берём в случайном порядке (см. shuffled_numbers). Курсор — индекс
+        # в перестановке, поэтому обход резюмируется после перезапуска и заканчивается.
+        start = max(number, 1) - 1
+        numbers, next_index = shuffled_numbers(slug, issued, start, self.settings.chunk_size)
+        self.status.position, self.status.issued = next_index, issued
         semaphore = asyncio.Semaphore(CONCURRENCY[self.preset])
 
         async def one(n: int) -> object:
@@ -355,9 +392,9 @@ class Crawler:
         # если хоть один номер не докачан (троттлинг/сеть) — смещение не двигаем, повторим
         # этот же проход, иначе подарок потерялся бы до следующего полного recrawl
         if any(r is _TRANSIENT for r in results):
-            await self.db.set_cursor(slug, offset)
+            await self.db.set_cursor(slug, number)  # не двигаем курсор — повторим этот же проход
         else:
-            await self.db.set_cursor(slug, offset + 1, finished=offset + 1 > stride)
+            await self.db.set_cursor(slug, next_index + 1, finished=next_index >= issued)
 
     async def _fetch_one(self, slug: str) -> ParsedGift | None:
         """Один NFT из лучшего доступного источника.
