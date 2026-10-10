@@ -53,7 +53,9 @@ def test_crawl_chunks_round_robin_resume_and_follow_issued(tmp_path, monkeypatch
             assert stats["gifts"] == 11  # 1..12 без №5
             assert stats["owners"] == 3
             row = (await db.collections())[0]
-            assert row["next_number"] == 13 and row["crawled_at"] is not None and row["issued"] == 12
+            # курсор — смещение внутри шага: тираж 12 при chunk_size=4 даёт stride=3,
+            # значит после 3 проходов (смещения 1,2,3) коллекция закрыта
+            assert row["next_number"] == 4 and row["crawled_at"] is not None and row["issued"] == 12
             assert calls.count("pepe-3") == 2
             assert crawler.limiters["nft_page"].stats.throttled == 1
         finally:
@@ -167,11 +169,13 @@ def test_chunk_does_not_skip_throttled_editions(tmp_path, monkeypatch):
         try:
             await db.upsert_collections([("c", "C")])
 
+            # тираж 10 при chunk_size=5 даёт stride=2, значит проход со смещением 1
+            # берёт вразброс номера 1, 3, 5, 7, 9
             async def fetch(session, slug):
                 n = int(slug.rsplit("-", 1)[1])
-                if n == 2:
+                if n == 3:
                     raise Throttled(0.001)  # всегда троттлит -> _call сдастся -> _TRANSIENT
-                if n == 4:
+                if n == 7:
                     return None  # реально отсутствует (редирект)
                 return ParsedGift(
                     slug=slug, title="C", number=n, backdrop="Amber", issued=10, owner=Owner(username=f"u{n}")
@@ -181,13 +185,13 @@ def test_chunk_does_not_skip_throttled_editions(tmp_path, monkeypatch):
             await crawler._crawl_chunk("c", number=1, issued=10)  # issued известен -> без discovery
 
             row = (await db.collections())[0]
-            # ключевой инвариант: курсор НЕ проскочил троттленный #2 — встал на него и не финишировал,
-            # значит на следующем проходе #2 будет повторён, а не потерян как «отсутствующий»
-            assert row["next_number"] == 2 and row["crawled_at"] is None
-            # успешные номера сохранены; #2 (троттл) и #4 (редирект=нет) — нет
+            # ключевой инвариант: из-за недокачанного #3 смещение НЕ сдвинулось и коллекция
+            # не закрыта — проход повторится, и #3 будет перезапрошен, а не потерян
+            assert row["next_number"] == 1 and row["crawled_at"] is None
+            # успешные номера прохода сохранены; #3 (троттл) и #7 (редирект=нет) — нет
             cur = await db.conn.execute("SELECT slug FROM gifts ORDER BY number")
             saved = [r[0] for r in await cur.fetchall()]
-            assert saved == ["c-1", "c-3", "c-5"] and "c-2" not in saved and "c-4" not in saved
+            assert saved == ["c-1", "c-5", "c-9"] and "c-3" not in saved and "c-7" not in saved
             assert crawler.limiters["nft_page"].stats.throttled >= 1
         finally:
             await crawler.shutdown()
@@ -243,6 +247,53 @@ def test_crawl_uses_mtproto_and_fills_owners(tmp_path, monkeypatch):
             people = await db.search_people(SearchQuery(seed=1), limit=10)
             assert {p["username"] for p in people} == {"u1", "u2", "u3"}
             assert crawler.limiters["nft_page"].stats.requests == 0  # t.me не трогали
+        finally:
+            await crawler.shutdown()
+            await db.close()
+
+    asyncio.run(main())
+
+
+def test_scattered_crawl_spreads_and_covers_everything(tmp_path, monkeypatch):
+    """Номера берутся вразброс по тиражу (а не подряд с №1, где сидят призовые
+    экземпляры со скрытыми владельцами), но за stride проходов тираж покрывается
+    целиком — без пропусков и без повторных скачиваний."""
+    fetched: list[int] = []
+
+    async def fake_fetch(session, slug):
+        n = int(slug.rsplit("-", 1)[1])
+        fetched.append(n)
+        return ParsedGift(slug=slug, title="C", number=n, backdrop="Amber", issued=1000)
+
+    monkeypatch.setattr(crawler_module, "fetch_nft", fake_fetch)
+
+    async def main():
+        settings = Settings(bot_token="1:x", db_path=tmp_path / "s.db", chunk_size=50, speed="fast")
+        db = Database(settings.db_path, medium_ton=10, rich_ton=100, default_gift_ton=3)
+        await db.connect()
+        crawler = Crawler(db, settings, Bot("123:abc"))
+        await crawler.setup()
+        crawler.limiters["nft_page"].rps = 100_000  # в тесте скорость сети не проверяем
+        try:
+            await db.upsert_collections([("c", "C")])
+
+            # первый проход: номера размазаны по всему тиражу, а не 1..50
+            await crawler._crawl_chunk("c", number=1, issued=1000)
+            first_pass = sorted(fetched)
+            assert first_pass[0] == 1 and first_pass[-1] > 900, first_pass[:5]
+            assert len(first_pass) == 50 and len(set(first_pass)) == 50
+
+            # докручиваем остальные проходы, пока коллекция не закроется
+            for _ in range(60):
+                row = (await db.collections())[0]
+                if row["crawled_at"] is not None:
+                    break
+                await crawler._crawl_chunk("c", row["next_number"], row["issued"] or 1000)
+
+            row = (await db.collections())[0]
+            assert row["crawled_at"] is not None  # коллекция закрыта
+            assert sorted(fetched) == list(range(1, 1001))  # весь тираж, каждый номер ровно один раз
+            assert (await db.stats())["gifts"] == 1000
         finally:
             await crawler.shutdown()
             await db.close()

@@ -323,10 +323,17 @@ class Crawler:
             if not issued:
                 await self.db.set_cursor(slug, 1, finished=True)
                 return
-            number = max(number, first.number + 1)
+            number = max(number, 1)
 
-        end = min(number + self.settings.chunk_size - 1, issued)
-        self.status.position, self.status.issued = number, issued
+        # Берём номера НЕ подряд, а вразброс по всему тиражу: подряд с №1 идут призовые
+        # и статусные экземпляры, владельцы которых почти всегда скрыты. Шаг подобран так,
+        # чтобы за один проход получить ~chunk_size номеров, равномерно размазанных по тиражу.
+        # Курсор теперь — смещение внутри шага (1..stride); за stride проходов покрывается
+        # весь тираж без пропусков, потому что любой n = offset + k * stride ровно один раз.
+        stride = max(1, -(-issued // self.settings.chunk_size))
+        offset = min(max(number, 1), stride)
+        numbers = list(range(offset, issued + 1, stride))[: self.settings.chunk_size]
+        self.status.position, self.status.issued = offset, issued
         semaphore = asyncio.Semaphore(CONCURRENCY[self.preset])
 
         async def one(n: int) -> object:
@@ -340,19 +347,17 @@ class Crawler:
                     self.status.missing += 1
                 return r
 
-        results = await asyncio.gather(*(one(n) for n in range(number, end + 1)))
+        results = await asyncio.gather(*(one(n) for n in numbers))
         gifts = [r for r in results if isinstance(r, ParsedGift)]
         if gifts:
             await self.db.save_gifts(gifts)
             issued = max([issued] + [g.issued or 0 for g in gifts])  # тираж мог вырасти
-        # первый недокачанный (троттлинг/сеть) номер: курсор ставим на успешный префикс,
-        # чтобы повторить именно его, а не «проскочить» подарок как отсутствующий
-        first_transient = next((i for i, r in enumerate(results) if r is _TRANSIENT), None)
-        if first_transient is None:
-            number = end + 1
-            await self.db.set_cursor(slug, number, finished=number > issued)
+        # если хоть один номер не докачан (троттлинг/сеть) — смещение не двигаем, повторим
+        # этот же проход, иначе подарок потерялся бы до следующего полного recrawl
+        if any(r is _TRANSIENT for r in results):
+            await self.db.set_cursor(slug, offset)
         else:
-            await self.db.set_cursor(slug, number + first_transient)
+            await self.db.set_cursor(slug, offset + 1, finished=offset + 1 > stride)
 
     async def _fetch_one(self, slug: str) -> ParsedGift | None:
         """Один NFT из лучшего доступного источника.
