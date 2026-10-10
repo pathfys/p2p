@@ -35,7 +35,7 @@ class LimiterStats:
 
 # когда сервер не присылает Retry-After, пауза растёт с каждым подряд идущим троттлом
 THROTTLE_BASE_PAUSE = 5.0
-THROTTLE_MAX_PAUSE = 60.0
+THROTTLE_MAX_PAUSE = 30.0  # потолок паузы: выше — обход почти останавливается
 
 
 class RateLimiter:

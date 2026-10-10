@@ -72,6 +72,42 @@ class MtprotoSource:
             self.limiter.on_success()
             return result
 
+    async def fetch_unique(self, slug: str) -> ParsedGift | None:
+        """Полные данные одного NFT по слагу, включая ВЛАДЕЛЬЦА.
+
+        Публичная страница t.me/nft отдаёт только отображаемое имя владельца, без
+        @username — поэтому людей в базу можно добрать только здесь:
+        payments.getUniqueStarGift возвращает owner_id (Peer) и список users с username,
+        либо owner_address, если подарок выведен в блокчейн.
+        None — слаг не существует или данные недоступны.
+        """
+        from telethon.errors import RPCError
+        from telethon.tl.functions.payments import GetUniqueStarGiftRequest
+        from telethon.tl.types import PeerUser
+
+        try:
+            result = await self._call(lambda: self.client(GetUniqueStarGiftRequest(slug=slug)))
+        except (ValueError, RPCError) as e:
+            log.info("MTProto: getUniqueStarGift %s: %s", slug, e)
+            return None
+
+        gift = result.gift
+        parsed = unique_from_tl(gift)
+        peer = getattr(gift, "owner_id", None)
+        user_id = peer.user_id if isinstance(peer, PeerUser) else (peer if isinstance(peer, int) else None)
+        address = getattr(gift, "owner_address", None)
+        if user_id:
+            user = next((u for u in (getattr(result, "users", None) or []) if getattr(u, "id", None) == user_id), None)
+            name = None
+            if user is not None:
+                name = " ".join(filter(None, [user.first_name, user.last_name])) or None
+            parsed.owner = Owner(user_id=user_id, username=getattr(user, "username", None), name=name)
+        elif address:
+            parsed.owner = Owner(ton_address=address)
+        else:  # владелец полностью скрыт — сохраняем хотя бы имя
+            parsed.owner_name = getattr(gift, "owner_name", None)
+        return parsed
+
     async def fetch_portfolio(self, username: str) -> Portfolio | None:
         """Все уникальные подарки аккаунта. None — юзернейм не существует."""
         from telethon.errors import RPCError

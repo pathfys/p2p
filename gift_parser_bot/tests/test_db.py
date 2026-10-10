@@ -260,6 +260,36 @@ def test_not_upgraded_filter_and_regular_gifts(tmp_path):
     run(tmp_path, scenario)
 
 
+def test_owner_backfill_queue_and_page_does_not_wipe_owner(tmp_path):
+    """Страница t.me/nft больше не отдаёт @username: она не должна обнулять владельца,
+    добытого через MTProto, а подарки без владельца должны попадать в очередь добора."""
+
+    async def scenario(db):
+        # страница отдала подарок вообще без владельца (owner=None, только имя)
+        page_gift = gift("pepe-1", owner=None, owner_name="Pavel Durov")
+        await db.save_gifts([page_gift])
+        assert await db.gifts_without_owner(10) == ["pepe-1"]  # в очередь на добор
+
+        # MTProto добрал владельца с @username
+        resolved = gift("pepe-1", Owner(user_id=1, username="durov", name="Pavel Durov"))
+        resolved.source = "mtproto"
+        await db.save_gifts([resolved])
+        assert await db.gifts_without_owner(10) == []  # больше не в очереди
+        assert (await db.gift("pepe-1"))["username"] == "durov"
+
+        # повторный обход страницы (владельца не знает) НЕ должен его стереть
+        await db.save_gifts([gift("pepe-1", owner=None, owner_name="Pavel Durov")])
+        assert (await db.gift("pepe-1"))["username"] == "durov"
+
+        # скрытого владельца отмечаем, чтобы очередь не крутилась по кругу
+        await db.save_gifts([gift("pepe-2", owner=None, owner_name="Hidden")])
+        assert await db.gifts_without_owner(10) == ["pepe-2"]
+        await db.mark_gift_owner_checked("pepe-2")
+        assert await db.gifts_without_owner(10) == []
+
+    run(tmp_path, scenario)
+
+
 def test_concurrent_saves_do_not_duplicate_owner(tmp_path):
     async def scenario(db):
         # живые проверки идут параллельно: два подарка одного нового владельца одновременно

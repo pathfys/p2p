@@ -67,6 +67,83 @@ def test_bot_api_regular_gift():
     assert regular_to_parsed(again).slug == parsed.slug
 
 
+def _unique_tl(owner_id=None, owner_address=None, owner_name=None):
+    from telethon.tl.types import StarGiftUnique
+
+    return StarGiftUnique(
+        id=1,
+        gift_id=2,
+        title="Durov's Cap",
+        slug="DurovsCap-7",
+        num=7,
+        availability_issued=4710,
+        availability_total=4774,
+        attributes=[],
+        owner_id=owner_id,
+        owner_address=owner_address,
+        owner_name=owner_name,
+    )
+
+
+def _fetch_unique(result):
+    """Вызывает MtprotoSource.fetch_unique с подменённым сетевым вызовом."""
+    import asyncio
+
+    from app.parsers.mtproto import MtprotoSource
+
+    source = object.__new__(MtprotoSource)  # без telethon-клиента
+
+    async def fake_call(request):
+        return result
+
+    source._call = fake_call
+    return asyncio.run(source.fetch_unique("durovscap-7"))
+
+
+def test_mtproto_unique_gift_resolves_owner_username():
+    """Ключевой путь: страница t.me/nft не отдаёт @username, а MTProto — отдаёт."""
+    from telethon.tl.types import PeerUser, User
+
+    class Result:
+        gift = _unique_tl(owner_id=PeerUser(user_id=5))
+        users = [User(id=5, first_name="Kate", last_name="K", username="kate")]
+        chats = []
+
+    parsed = _fetch_unique(Result())
+    assert parsed.owner is not None
+    assert (parsed.owner.user_id, parsed.owner.username, parsed.owner.name) == (5, "kate", "Kate K")
+    assert parsed.slug == "durovscap-7" and parsed.source == "mtproto"
+
+
+def test_mtproto_unique_gift_wallet_and_hidden_owner():
+    from telethon.tl.types import PeerUser
+
+    class OnChain:
+        gift = _unique_tl(owner_address="UQabc")
+        users = []
+        chats = []
+
+    on_chain = _fetch_unique(OnChain())
+    assert on_chain.owner.ton_address == "UQabc" and on_chain.owner.username is None
+
+    class Hidden:
+        gift = _unique_tl(owner_name="Скрытый")
+        users = []
+        chats = []
+
+    hidden = _fetch_unique(Hidden())
+    assert hidden.owner is None and hidden.owner_name == "Скрытый"
+
+    # владелец известен только по id (нет его в users) — всё равно это человек
+    class OnlyId:
+        gift = _unique_tl(owner_id=PeerUser(user_id=9))
+        users = []
+        chats = []
+
+    only_id = _fetch_unique(OnlyId())
+    assert only_id.owner.user_id == 9 and only_id.owner.username is None
+
+
 def test_mtproto_unique_gift():
     gift = StarGiftUnique(
         id=1,

@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS gifts (
     owner_name       TEXT,
     source           TEXT,
     is_upgraded      INTEGER NOT NULL DEFAULT 1,  -- 1 = коллекционный NFT, 0 = обычный подарок
+    owner_checked_at INTEGER,                     -- когда пытались добрать владельца через MTProto
     updated_at       INTEGER
 );
 
@@ -148,7 +149,10 @@ class Database:
         columns = {row[1] for row in await cur.fetchall()}
         if "is_upgraded" not in columns:
             await self._conn.execute("ALTER TABLE gifts ADD COLUMN is_upgraded INTEGER NOT NULL DEFAULT 1")
+        if "owner_checked_at" not in columns:
+            await self._conn.execute("ALTER TABLE gifts ADD COLUMN owner_checked_at INTEGER")
         await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_gifts_upgraded ON gifts(is_upgraded)")
+        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_gifts_no_owner ON gifts(owner_id, owner_checked_at)")
 
     async def close(self) -> None:
         if self._conn:
@@ -314,8 +318,9 @@ class Database:
             owner_id = await self._owner_id(gift.owner)
             if old and old["owner_id"]:
                 touched.add(old["owner_id"])
-                # на странице только имя, а владелец уже известен (по Bot API) — не теряем его
-                if owner_id is None and gift.owner_name and gift.owner_name == old["name"]:
+                # Источник не знает владельца (страницы t.me/nft больше не отдают @username) —
+                # не затираем владельца, уже добытого через MTProto/Bot API.
+                if owner_id is None and gift.owner is None:
                     owner_id = old["owner_id"]
             if owner_id:
                 touched.add(owner_id)
@@ -426,6 +431,23 @@ class Database:
             (stale_before, limit),
         )
         return list(await cur.fetchall())
+
+    async def gifts_without_owner(self, limit: int, stale_before: int = 0) -> list[str]:
+        """NFT, у которых владелец неизвестен: страница t.me/nft его больше не отдаёт,
+        поэтому владельца добираем через MTProto. Уже опрошенные повторяем не сразу."""
+        cur = await self.conn.execute(
+            """SELECT slug FROM gifts
+               WHERE is_upgraded = 1 AND owner_id IS NULL
+                 AND (owner_checked_at IS NULL OR owner_checked_at < ?)
+               ORDER BY owner_checked_at IS NOT NULL, updated_at
+               LIMIT ?""",
+            (stale_before, limit),
+        )
+        return [row[0] for row in await cur.fetchall()]
+
+    async def mark_gift_owner_checked(self, slug: str) -> None:
+        await self.conn.execute("UPDATE gifts SET owner_checked_at = ? WHERE slug = ?", (now(), slug))
+        await self.conn.commit()
 
     async def mark_owner_checked(self, owner_id: int) -> None:
         await self.conn.execute("UPDATE owners SET gifts_checked_at = ? WHERE id = ?", (now(), owner_id))

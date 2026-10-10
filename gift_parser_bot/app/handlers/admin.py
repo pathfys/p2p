@@ -69,7 +69,16 @@ async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecke
         f"Страниц: {num(st.pages)} · подарков: {num(st.gifts)} · пусто: {num(st.missing)}",
         f"Троттлинг t.me: {num(st.throttled)} (это норма, не ошибка) · ошибок: {num(st.errors)}",
         f"Bot API юзеров: {num(st.users_checked)} · MTProto: {'вкл' if crawler.mtproto else 'выкл'} "
-        f"({num(st.owners_enriched)})",
+        f"· владельцев добрано: {num(st.owners_enriched)}",
+        *(
+            []
+            if crawler.mtproto
+            else [
+                "<b>MTProto выключен — владельцы собираться НЕ будут.</b> Страницы t.me/nft "
+                "отдают только имя без @username. Задайте API_ID/API_HASH и выполните вход "
+                "(<code>python gift_parser_bot.py --login</code>)."
+            ]
+        ),
         subscription_line(checker),
         "",
         f"<b>Скорость: {crawler.preset}</b>",

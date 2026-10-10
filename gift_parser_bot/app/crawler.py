@@ -105,7 +105,8 @@ class Crawler:
         self.status = CrawlStatus(started_at=time.time(), phase="запуск", floors_synced_at=self.status.floors_synced_at)
         loops = [self._nft_loop, self._fragment_loop, self._botapi_loop]
         if self.mtproto:
-            loops.append(self._mtproto_loop)
+            # без MTProto владельцев взять негде: на страницах t.me/nft их больше нет
+            loops += [self._owner_loop, self._mtproto_loop]
         self._tasks = [asyncio.create_task(self._guard(loop)) for loop in loops]
         return True
 
@@ -308,8 +309,11 @@ class Crawler:
         async def one(n: int) -> object:
             async with semaphore:
                 r = await self._safe_fetch(f"{slug}-{n}")
-                self.status.pages += 1  # прогресс виден сразу, а не после всего чанка
-                if r is None:
+                # прогресс виден сразу, а не только после всего чанка из chunk_size номеров
+                self.status.pages += 1
+                if isinstance(r, ParsedGift):
+                    self.status.gifts += 1
+                elif r is None:
                     self.status.missing += 1
                 return r
 
@@ -318,7 +322,6 @@ class Crawler:
         if gifts:
             await self.db.save_gifts(gifts)
             issued = max([issued] + [g.issued or 0 for g in gifts])  # тираж мог вырасти
-        self.status.gifts += len(gifts)
         # первый недокачанный (троттлинг/сеть) номер: курсор ставим на успешный префикс,
         # чтобы повторить именно его, а не «проскочить» подарок как отсутствующий
         first_transient = next((i for i, r in enumerate(results) if r is _TRANSIENT), None)
@@ -353,6 +356,33 @@ class Crawler:
                 await asyncio.sleep(60)
                 continue
             await asyncio.gather(*(one(row) for row in users))
+
+    async def _owner_loop(self) -> None:
+        """Добор владельцев. Страницы t.me/nft с некоторых пор не содержат @username —
+        там только отображаемое имя. Поэтому владельца (user_id/@username/кошелёк)
+        берём через MTProto: payments.getUniqueStarGift. Без сессии людей в базе не будет."""
+        while True:
+            slugs = await self.db.gifts_without_owner(50, now() - self.settings.recrawl_hours * 3600)
+            if not slugs:
+                self.status.phase = "владельцы добраны, жду новые подарки"
+                await asyncio.sleep(60)
+                continue
+            self.status.phase = "добор владельцев (MTProto)"
+            for slug in slugs:
+                try:
+                    gift = await self.mtproto.fetch_unique(slug)
+                except Exception as e:
+                    self.status.errors += 1
+                    self.status.last_error = f"owner {slug}: {e!r}"
+                    await asyncio.sleep(5)
+                    continue
+                # отмечаем попытку всегда, иначе скрытые владельцы крутились бы по кругу
+                await self.db.mark_gift_owner_checked(slug)
+                if gift is None:
+                    continue
+                await self.db.save_gifts([gift])
+                if gift.owner is not None:
+                    self.status.owners_enriched += 1
 
     async def _mtproto_loop(self) -> None:
         while True:
