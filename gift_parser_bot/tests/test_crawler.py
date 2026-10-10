@@ -83,6 +83,32 @@ def test_rate_limiter_adapts():
         fixed.set_preset("turbo")
 
 
+def test_rate_limiter_backs_off_on_repeated_throttle():
+    import time
+
+    limiter = RateLimiter("nft_page", "slow")  # фиксированный пресет: сам rps не меняется
+
+    def pause_now() -> float:
+        limiter._paused_until = 0.0  # изолируем длительность одной паузы
+        t = time.monotonic()
+        limiter.on_throttle(None)  # Retry-After нет -> нарастающий бэкофф
+        return limiter._paused_until - t
+
+    d1 = pause_now()  # 1-й троттл подряд
+    d2 = pause_now()  # 2-й подряд -> пауза больше
+    assert d2 > d1 and limiter._throttle_streak == 2
+    limiter.on_success()  # успех прерывает серию
+    assert limiter._throttle_streak == 0
+    d3 = pause_now()  # снова короткая пауза, как в начале
+    assert d3 < d2
+
+    # когда сервер прислал Retry-After — уважаем ровно его, без эскалации
+    limiter._paused_until = 0.0
+    t = time.monotonic()
+    limiter.on_throttle(3)
+    assert 3.0 <= (limiter._paused_until - t) < 4.0
+
+
 def test_rate_limiter_spacing():
     async def main():
         limiter = RateLimiter("botapi", "fast")  # 25 req/s -> 10 запросов ≈ 0.36 с

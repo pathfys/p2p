@@ -33,6 +33,11 @@ class LimiterStats:
     throttled: int = 0
 
 
+# когда сервер не присылает Retry-After, пауза растёт с каждым подряд идущим троттлом
+THROTTLE_BASE_PAUSE = 5.0
+THROTTLE_MAX_PAUSE = 60.0
+
+
 class RateLimiter:
     def __init__(self, name: str, preset: str = "auto"):
         self.name = name
@@ -40,6 +45,7 @@ class RateLimiter:
         self._next_at = 0.0
         self._paused_until = 0.0
         self._streak = 0
+        self._throttle_streak = 0
         self.stats = LimiterStats()
         self.set_preset(preset)
 
@@ -67,6 +73,7 @@ class RateLimiter:
             await asyncio.sleep(start - now)
 
     def on_success(self) -> None:
+        self._throttle_streak = 0  # серия троттлов прервана — сбрасываем нарастающую паузу
         if not self.adaptive:
             return
         self._streak += 1
@@ -77,7 +84,11 @@ class RateLimiter:
     def on_throttle(self, retry_after: float | None) -> None:
         self.stats.throttled += 1
         self._streak = 0
-        pause = retry_after if retry_after and retry_after > 0 else 5.0
+        self._throttle_streak += 1
+        if retry_after and retry_after > 0:
+            pause = retry_after  # сервер сам сказал, сколько ждать — уважаем
+        else:  # Retry-After нет: экспоненциальный бэкофф, чтобы не долбить источник впустую
+            pause = min(THROTTLE_MAX_PAUSE, THROTTLE_BASE_PAUSE * 2 ** (self._throttle_streak - 1))
         self._paused_until = max(self._paused_until, time.monotonic() + pause)
         if self.adaptive:  # мультипликативное снижение
             self.rps = max(self.min_rps, self.rps / 2)

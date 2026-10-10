@@ -53,6 +53,7 @@ class CrawlStatus:
     pages: int = 0
     gifts: int = 0
     missing: int = 0
+    throttled: int = 0
     errors: int = 0
     users_checked: int = 0
     owners_enriched: int = 0
@@ -276,9 +277,13 @@ class Crawler:
             for probe in (1, 2, 3, 5, 10, 25, 50):
                 try:
                     g = await self._call("nft_page", fetch_nft, self.session, f"{slug}-{probe}")
+                except Throttled:
+                    # троттлинг t.me — это НЕ ошибка, а бэкпрешер: не финишируем, повторим позже
+                    self.status.throttled += 1
+                    return
                 except Exception as e:
-                    # транзиент/троттлинг — НЕ финишируем, повторим в следующий проход,
-                    # иначе сбой/нагрузка «похоронили» бы коллекцию до следующего recrawl
+                    # транзиент/сбой — тоже НЕ финишируем, повторим в следующий проход,
+                    # иначе сбой «похоронил» бы коллекцию до следующего recrawl
                     self.status.errors += 1
                     self.status.last_error = f"{slug}-{probe}: {e!r}"
                     return
@@ -325,6 +330,9 @@ class Crawler:
         """ParsedGift — подарок есть; None — подарка нет (редирект); _TRANSIENT — не докачали."""
         try:
             return await self._call("nft_page", fetch_nft, self.session, slug)
+        except Throttled:
+            self.status.throttled += 1  # бэкпрешер t.me — не ошибка, повторим позже
+            return _TRANSIENT
         except Exception as e:
             self.status.errors += 1
             self.status.last_error = f"{slug}: {e!r}"

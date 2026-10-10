@@ -10,7 +10,8 @@ class Throttled(Exception):
     """Источник попросил притормозить (HTTP 429 / RetryAfter / FLOOD_WAIT)."""
 
     def __init__(self, retry_after: float | None = None):
-        super().__init__(f"throttled, retry after {retry_after}s")
+        wait = f"{retry_after:g}s" if retry_after else "unknown"
+        super().__init__(f"throttled, retry after {wait}")
         self.retry_after = retry_after
 
 
