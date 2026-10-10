@@ -68,7 +68,8 @@ async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecke
         f"Коллекция: {escape(position)}",
         f"Страниц: {num(st.pages)} · подарков: {num(st.gifts)} · пусто: {num(st.missing)}",
         f"Троттлинг t.me: {num(st.throttled)} (это норма, не ошибка) · ошибок: {num(st.errors)}",
-        f"Bot API юзеров: {num(st.users_checked)} · MTProto: {'вкл' if crawler.mtproto else 'выкл'} "
+        f"Bot API юзеров: {num(st.users_checked)} · MTProto: "
+        f"{f'вкл, аккаунтов {len(crawler.mtproto)}' if crawler.mtproto else 'выкл'} "
         f"· владельцев добрано: {num(st.owners_enriched)}",
         *(
             []

@@ -28,7 +28,7 @@ from .db import Database, now
 from .parsers import fragment
 from .parsers.botapi import fetch_user_portfolio
 from .parsers.models import ParsedGift, Portfolio, Throttled
-from .parsers.mtproto import MtprotoSource
+from .parsers.mtproto import MtprotoPool, MtprotoSource
 from .parsers.nft_page import fetch_nft
 from .parsers.seed import SEED_COLLECTIONS
 from .ratelimit import CONCURRENCY, SPEED_PRESETS, SPEED_TABLE, RateLimiter
@@ -70,7 +70,7 @@ class Crawler:
         self.preset = preset
         self.limiters = {name: RateLimiter(name, preset) for name in SPEED_TABLE}
         self.status = CrawlStatus()
-        self.mtproto: MtprotoSource | None = None
+        self.mtproto: MtprotoPool | None = None
         self._session: aiohttp.ClientSession | None = None
         self._tasks: list[asyncio.Task] = []
         self._sync_lock = asyncio.Lock()
@@ -79,14 +79,36 @@ class Crawler:
     async def setup(self) -> None:
         self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=25), trust_env=True)
         if self.settings.mtproto_enabled:
-            s = self.settings
-            source = MtprotoSource(s.api_id, s.api_hash, str(s.mtproto_session), self.limiters["mtproto"])
+            await self._start_mtproto()
+
+    async def _start_mtproto(self) -> None:
+        """Поднимает все сессии из MTPROTO_SESSIONS. У каждого аккаунта свой лимитер:
+        лимиты Telegram считаются на аккаунт, поэтому они не должны делить одну очередь."""
+        s = self.settings
+        paths = s.session_paths
+        sources: list[MtprotoSource] = []
+        for path in paths:
+            limiter = (
+                self.limiters["mtproto"]
+                if len(paths) == 1
+                else RateLimiter("mtproto", self.preset, label=f"mtproto:{path.name}")
+            )
+            source = MtprotoSource(s.api_id, s.api_hash, str(path), limiter, name=path.name)
             try:
                 await source.start()
-                self.mtproto = source
-                log.info("MTProto-источник подключён")
             except Exception as e:  # бот должен работать и без userbot-а
-                log.warning("MTProto отключён: %s", e)
+                log.warning("MTProto[%s] отключён: %s", path.name, e)
+                continue
+            if len(paths) > 1:
+                self.limiters[f"mtproto:{path.name}"] = limiter
+            sources.append(source)
+        if not sources:
+            log.warning("Ни одна MTProto-сессия не поднялась — владельцы собираться не будут")
+            return
+        if len(paths) > 1:
+            self.limiters.pop("mtproto", None)  # общий лимитер не нужен: он есть у каждого аккаунта
+        self.mtproto = MtprotoPool(sources)
+        log.info("MTProto подключён, аккаунтов: %d (%s)", len(sources), ", ".join(self.mtproto.names))
 
     async def shutdown(self) -> None:
         await self.stop()

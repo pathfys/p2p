@@ -43,11 +43,14 @@ def unique_from_tl(gift) -> ParsedGift:
 
 
 class MtprotoSource:
-    def __init__(self, api_id: int, api_hash: str, session_path: str, limiter: RateLimiter):
+    def __init__(self, api_id: int, api_hash: str, session_path: str, limiter: RateLimiter, name: str = ""):
+        from pathlib import Path
+
         from telethon import TelegramClient
 
         self.client = TelegramClient(session_path, api_id, api_hash)
         self.limiter = limiter
+        self.name = name or Path(session_path).name
 
     async def start(self) -> None:
         await self.client.connect()
@@ -58,16 +61,20 @@ class MtprotoSource:
     async def stop(self) -> None:
         await self.client.disconnect()
 
-    async def _call(self, request):
+    async def _call(self, request, max_floods: int = 2):
         from telethon.errors import FloodWaitError
 
+        floods = 0
         while True:
             await self.limiter.acquire()
             try:
                 result = await request()
             except FloodWaitError as e:
-                log.warning("MTProto FLOOD_WAIT %ss", e.seconds)
+                floods += 1
+                log.warning("MTProto[%s] FLOOD_WAIT %ss", self.name, e.seconds)
                 self.limiter.on_throttle(e.seconds)
+                if floods >= max_floods:
+                    raise  # пусть вызывающий пул попробует другой аккаунт
                 continue
             self.limiter.on_success()
             return result
@@ -81,12 +88,14 @@ class MtprotoSource:
         либо owner_address, если подарок выведен в блокчейн.
         None — слаг не существует или данные недоступны.
         """
-        from telethon.errors import RPCError
+        from telethon.errors import FloodWaitError, RPCError
         from telethon.tl.functions.payments import GetUniqueStarGiftRequest
         from telethon.tl.types import PeerUser
 
         try:
             result = await self._call(lambda: self.client(GetUniqueStarGiftRequest(slug=slug)))
+        except FloodWaitError:
+            raise  # это НЕ «подарка нет»: отдаём наверх, чтобы сработал другой аккаунт
         except (ValueError, RPCError) as e:
             log.info("MTProto: getUniqueStarGift %s: %s", slug, e)
             return None
@@ -110,12 +119,14 @@ class MtprotoSource:
 
     async def fetch_portfolio(self, username: str) -> Portfolio | None:
         """Все уникальные подарки аккаунта. None — юзернейм не существует."""
-        from telethon.errors import RPCError
+        from telethon.errors import FloodWaitError, RPCError
         from telethon.tl.functions.payments import GetSavedStarGiftsRequest
         from telethon.tl.types import StarGiftUnique, User
 
         try:
             entity = await self._call(lambda: self.client.get_entity(username))
+        except FloodWaitError:
+            raise
         except (ValueError, RPCError) as e:
             log.info("MTProto: не удалось найти %s: %s", username, e)
             return None
@@ -139,3 +150,48 @@ class MtprotoSource:
             if not page.next_offset:
                 return portfolio
             offset = page.next_offset
+
+
+class MtprotoPool:
+    """Пул MTProto-аккаунтов.
+
+    Лимиты Telegram считаются НА АККАУНТ, поэтому несколько сессий дают почти кратную
+    скорость. Запрос уходит на самый свободный аккаунт; если он поймал FLOOD_WAIT —
+    пробуем следующий, а «уставший» сам выпадет из ротации, пока не истечёт его пауза.
+    """
+
+    def __init__(self, sources: list[MtprotoSource]):
+        self.sources = list(sources)
+
+    def __len__(self) -> int:
+        return len(self.sources)
+
+    @property
+    def names(self) -> list[str]:
+        return [s.name for s in self.sources]
+
+    def _by_readiness(self) -> list[MtprotoSource]:
+        return sorted(self.sources, key=lambda s: s.limiter.busy_until)
+
+    async def _any(self, call):
+        from telethon.errors import FloodWaitError
+
+        flood = None
+        for source in self._by_readiness():
+            try:
+                return await call(source)
+            except FloodWaitError as e:  # этот аккаунт на паузе — пробуем следующий
+                flood = e
+        if flood is not None:
+            raise flood
+        return None
+
+    async def fetch_unique(self, slug: str) -> ParsedGift | None:
+        return await self._any(lambda s: s.fetch_unique(slug))
+
+    async def fetch_portfolio(self, username: str) -> Portfolio | None:
+        return await self._any(lambda s: s.fetch_portfolio(username))
+
+    async def stop(self) -> None:
+        for source in self.sources:
+            await source.stop()

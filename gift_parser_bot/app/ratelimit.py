@@ -39,8 +39,9 @@ THROTTLE_MAX_PAUSE = 30.0  # потолок паузы: выше — обход 
 
 
 class RateLimiter:
-    def __init__(self, name: str, preset: str = "auto"):
+    def __init__(self, name: str, preset: str = "auto", label: str | None = None):
         self.name = name
+        self.label = label or name  # что показывать в /admin (для пула аккаунтов — имя сессии)
         self._lock = asyncio.Lock()
         self._next_at = 0.0
         self._paused_until = 0.0
@@ -93,6 +94,11 @@ class RateLimiter:
         if self.adaptive:  # мультипликативное снижение
             self.rps = max(self.min_rps, self.rps / 2)
 
+    @property
+    def busy_until(self) -> float:
+        """До какого момента источник на паузе (нужно пулу, чтобы выбрать свободный аккаунт)."""
+        return self._paused_until
+
     def describe(self) -> str:
         mode = "auto" if self.adaptive else self.preset
-        return f"{self.name}: {self.rps:.1f} req/s ({mode}), 429: {self.stats.throttled}"
+        return f"{self.label}: {self.rps:.1f} req/s ({mode}), 429: {self.stats.throttled}"

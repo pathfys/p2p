@@ -61,10 +61,22 @@ class Settings:
     api_id: int | None = None
     api_hash: str | None = None
     mtproto_session: Path = BASE_DIR / "data" / "parser"
+    # Пул аккаунтов: имена файлов сессий (MTPROTO_SESSIONS=acc1,acc2,...).
+    # Лимиты Telegram считаются на аккаунт, поэтому N сессий дают примерно N-кратную скорость.
+    # Телефоны здесь не хранятся — их спрашивает --login при создании каждой сессии.
+    mtproto_sessions: tuple[str, ...] = ()
 
     @property
     def mtproto_enabled(self) -> bool:
         return bool(self.api_id and self.api_hash)
+
+    @property
+    def session_paths(self) -> list[Path]:
+        """Пути к файлам сессий. Без MTPROTO_SESSIONS — одна сессия по умолчанию."""
+        if not self.mtproto_sessions:
+            return [self.mtproto_session]
+        folder = self.mtproto_session.parent
+        return [folder / name for name in self.mtproto_sessions]
 
 
 def load_settings() -> Settings:
@@ -96,4 +108,5 @@ def load_settings() -> Settings:
         api_id=int(api_id) if api_id else None,
         api_hash=os.getenv("API_HASH", "").strip() or None,
         mtproto_session=Path(session) if session else Settings.mtproto_session,
+        mtproto_sessions=tuple(n for n in (x.strip() for x in os.getenv("MTPROTO_SESSIONS", "").split(",")) if n),
     )

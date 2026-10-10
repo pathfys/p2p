@@ -178,3 +178,42 @@ def test_mtproto_unique_gift():
         "Pickaxe",
         2,
     )
+
+
+def test_mtproto_pool_failover_and_spreading():
+    """Лимиты считаются на аккаунт: при FLOOD_WAIT запрос должен уйти на другую сессию,
+    а «уставший» аккаунт — уступать очередь, пока его пауза не истечёт."""
+    import asyncio
+
+    from telethon.errors import FloodWaitError
+
+    from app.parsers.models import ParsedGift
+    from app.parsers.mtproto import MtprotoPool
+    from app.ratelimit import RateLimiter
+
+    class FakeSource:
+        def __init__(self, name, floods=0):
+            self.name = name
+            self.limiter = RateLimiter("mtproto", "fast", label=name)
+            self.calls = []
+            self.floods = floods
+
+        async def fetch_unique(self, slug):
+            self.calls.append(slug)
+            if self.floods:
+                self.floods -= 1
+                self.limiter.on_throttle(30)  # аккаунт уходит на паузу
+                raise FloodWaitError(request=None, capture=30)
+            return ParsedGift(slug=slug, title="C", number=1, source="mtproto")
+
+    first, second = FakeSource("acc1", floods=1), FakeSource("acc2")
+    pool = MtprotoPool([first, second])
+    assert len(pool) == 2 and pool.names == ["acc1", "acc2"]
+
+    gift = asyncio.run(pool.fetch_unique("c-1"))
+    assert gift is not None and gift.slug == "c-1"  # отработали, несмотря на FLOOD_WAIT
+    assert first.calls == ["c-1"] and second.calls == ["c-1"]  # перешли на второй аккаунт
+
+    # теперь acc1 на паузе -> следующий запрос начинается со свободного acc2
+    asyncio.run(pool.fetch_unique("c-2"))
+    assert second.calls == ["c-1", "c-2"] and first.calls == ["c-1"]
