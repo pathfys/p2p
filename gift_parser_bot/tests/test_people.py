@@ -116,6 +116,28 @@ def test_people_keyboard_and_page_text():
     assert "@user10 /" not in page2 and "1.23 с" in page2
 
 
+def test_regular_gift_row_has_no_nft_link():
+    from app.texts import person_card
+
+    regular = {
+        "slug": "regular50-7",
+        "title": "regular50",  # в БД у обычного подарка «коллекция» = regular<звёзды>
+        "number": 7,
+        "is_upgraded": 0,
+        "matched": 2,
+        "username": "kate",
+        "o_name": None,
+        "user_id": None,
+        "ton_address": None,
+        "owner_name": None,
+        "gifts_count": 0,
+        "value_ton": 0,
+    }
+    line = person_card(regular, 1)
+    assert "t.me/nft" not in line  # у обычного подарка нет страницы NFT
+    assert "Обычный подарок, 50 звёзд" in line and "@kate" in line and "(2 шт.)" in line
+
+
 def test_female_search_progresses_across_rounds(tmp_path):
     """Пост-фильтр по полу не должен застревать: смена seed между раундами добирает всех девочек."""
 

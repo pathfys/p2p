@@ -106,6 +106,8 @@ class PeopleParser:
         return result
 
     async def _verify(self, person: dict) -> dict | None:
+        if not person.get("is_upgraded", 1):
+            return person  # обычный подарок — страницы t.me/nft нет, проверять нечего
         try:
             gift = await self.crawler.fetch_gift(person["slug"])
         except Exception as e:  # t.me недоступен — показываем данные из базы, без проверки

@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS gifts (
     owner_id         INTEGER REFERENCES owners(id) ON DELETE SET NULL,
     owner_name       TEXT,
     source           TEXT,
+    is_upgraded      INTEGER NOT NULL DEFAULT 1,  -- 1 = коллекционный NFT, 0 = обычный подарок
     updated_at       INTEGER
 );
 
@@ -83,7 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_owners_tier      ON owners(tier, value_ton);
 GIFT_SELECT = """
 SELECT g.rowid AS gift_rowid, g.owner_id, g.slug, g.number, COALESCE(c.title, g.collection) AS title,
        g.model, g.model_rarity, g.backdrop, g.backdrop_rarity, g.symbol, g.symbol_rarity,
-       g.owner_name, o.username, o.name AS o_name, o.ton_address, o.user_id,
+       g.is_upgraded, g.owner_name, o.username, o.name AS o_name, o.ton_address, o.user_id,
        o.tier, o.gifts_count, o.value_ton
 FROM gifts g
 LEFT JOIN owners o ON o.id = g.owner_id
@@ -108,6 +109,7 @@ class SearchQuery:
     min_gifts: int | None = None  # владелец имеет не меньше N подарков (фильтр «По NFT»)
     min_rarity: int | None = None  # редкость модели не хуже N‰ (фильтр «По редкости»)
     female: bool = False  # только владельцы с женским именем (поиск «Девочки»)
+    not_upgraded: bool = False  # только обычные (неулучшенные) подарки (фильтр «Обычные подарки»)
     seed: int = 1  # для стабильного «случайного» порядка между страницами
 
 
@@ -137,7 +139,16 @@ class Database:
         self._conn = await aiosqlite.connect(self.path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """Нежёсткие миграции для старых БД: добавляем новые колонки/индексы на месте."""
+        cur = await self._conn.execute("PRAGMA table_info(gifts)")
+        columns = {row[1] for row in await cur.fetchall()}
+        if "is_upgraded" not in columns:
+            await self._conn.execute("ALTER TABLE gifts ADD COLUMN is_upgraded INTEGER NOT NULL DEFAULT 1")
+        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_gifts_upgraded ON gifts(is_upgraded)")
 
     async def close(self) -> None:
         if self._conn:
@@ -310,14 +321,15 @@ class Database:
                 touched.add(owner_id)
             await self.conn.execute(
                 """INSERT INTO gifts (slug, collection, number, model, model_rarity, backdrop, backdrop_rarity,
-                                      symbol, symbol_rarity, owner_id, owner_name, source, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      symbol, symbol_rarity, owner_id, owner_name, source, is_upgraded, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(slug) DO UPDATE SET
                        model = excluded.model, model_rarity = excluded.model_rarity,
                        backdrop = excluded.backdrop, backdrop_rarity = excluded.backdrop_rarity,
                        symbol = excluded.symbol, symbol_rarity = excluded.symbol_rarity,
                        owner_id = excluded.owner_id, owner_name = excluded.owner_name,
-                       source = excluded.source, updated_at = excluded.updated_at""",
+                       source = excluded.source, is_upgraded = excluded.is_upgraded,
+                       updated_at = excluded.updated_at""",
                 (
                     gift.slug,
                     gift.collection,
@@ -331,10 +343,14 @@ class Database:
                     owner_id,
                     None if owner_id else gift.owner_name,
                     gift.source,
+                    int(gift.upgraded),
                     now(),
                 ),
             )
-            if gift.collection not in meta or (gift.issued or 0) > (meta[gift.collection].issued or 0):
+            # коллекции (тираж/floor) ведём только по улучшенным NFT, обычные подарки их не создают
+            if gift.upgraded and (
+                gift.collection not in meta or (gift.issued or 0) > (meta[gift.collection].issued or 0)
+            ):
                 meta[gift.collection] = gift
 
         for slug, gift in meta.items():
@@ -371,12 +387,14 @@ class Database:
 
     async def recompute_owners(self, ids: set[int] | None = None) -> None:
         """Количество NFT, оценка портфеля в TON и режим (light / medium / rich)."""
+        # gifts_count и оценка считаются только по улучшенным NFT: обычные подарки
+        # не имеют floor и не должны поднимать владельца в Medium/Rich
         sql = """
             UPDATE owners SET
-                gifts_count = (SELECT COUNT(*) FROM gifts g WHERE g.owner_id = owners.id),
+                gifts_count = (SELECT COUNT(*) FROM gifts g WHERE g.owner_id = owners.id AND g.is_upgraded = 1),
                 value_ton = (SELECT COALESCE(SUM(COALESCE(c.floor_ton, :def)), 0)
                              FROM gifts g LEFT JOIN collections c ON c.slug = g.collection
-                             WHERE g.owner_id = owners.id)
+                             WHERE g.owner_id = owners.id AND g.is_upgraded = 1)
             {where};
             UPDATE owners SET tier = CASE WHEN value_ton >= :rich THEN 'rich'
                                           WHEN value_ton >= :medium THEN 'medium'
@@ -427,6 +445,8 @@ class Database:
         if q.min_rarity:
             where.append("g.model_rarity IS NOT NULL AND g.model_rarity <= ?")
             args.append(q.min_rarity)
+        if q.not_upgraded:
+            where.append("g.is_upgraded = 0")
         for word in (q.text or "").split():
             like = f"%{word}%"
             where.append(
@@ -547,7 +567,8 @@ class Database:
 
     async def stats(self) -> dict[str, int]:
         result = {
-            "gifts": await self._scalar("SELECT COUNT(*) FROM gifts"),
+            "gifts": await self._scalar("SELECT COUNT(*) FROM gifts WHERE is_upgraded = 1"),
+            "regular": await self._scalar("SELECT COUNT(*) FROM gifts WHERE is_upgraded = 0"),
             "owners": await self._scalar("SELECT COUNT(*) FROM owners WHERE gifts_count > 0"),
             "collections": await self._scalar("SELECT COUNT(*) FROM collections"),
             "users": await self._scalar("SELECT COUNT(*) FROM users WHERE is_bot_user = 1"),

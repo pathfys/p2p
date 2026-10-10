@@ -1,4 +1,6 @@
 from aiogram.types import (
+    Gift,
+    OwnedGiftRegular,
     Sticker,
     UniqueGift,
     UniqueGiftBackdrop,
@@ -16,7 +18,7 @@ from telethon.tl.types import (
     StarGiftUnique,
 )
 
-from app.parsers.botapi import unique_to_parsed
+from app.parsers.botapi import regular_to_parsed, unique_to_parsed
 from app.parsers.mtproto import unique_from_tl
 
 
@@ -48,6 +50,21 @@ def test_bot_api_unique_gift():
         "Onyx Black",
         5,
     )
+
+
+def test_bot_api_regular_gift():
+    gift = Gift(id="99", sticker=sticker(), star_count=50)
+    owned = OwnedGiftRegular(type="regular", gift=gift, send_date=0, owned_gift_id="abc123")
+    parsed = regular_to_parsed(owned)
+    assert parsed is not None
+    assert parsed.upgraded is False  # обычный (неулучшенный) подарок
+    assert parsed.source == "botapi"
+    assert parsed.collection == "regular50" and parsed.slug.startswith("regular50-")
+    assert parsed.title == "Обычный подарок, 50 звёзд"
+    assert parsed.model is None and parsed.backdrop is None  # у обычного нет модели/фона
+    # тот же подарок -> тот же slug (стабильность, без дублей в базе)
+    again = OwnedGiftRegular(type="regular", gift=gift, send_date=1, owned_gift_id="abc123")
+    assert regular_to_parsed(again).slug == parsed.slug
 
 
 def test_mtproto_unique_gift():

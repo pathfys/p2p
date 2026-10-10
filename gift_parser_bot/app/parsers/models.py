@@ -45,6 +45,9 @@ class ParsedGift:
     # Имя владельца без юзернейма — сохраняем только для отображения
     owner_name: str | None = None
     source: str = "nft_page"
+    # True — улучшенный коллекционный NFT (есть модель/фон/узор, страница t.me/nft).
+    # False — обычный (неулучшенный) звёздный подарок из Bot API: страницы NFT у него нет.
+    upgraded: bool = True
 
     @property
     def collection(self) -> str:

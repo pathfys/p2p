@@ -218,6 +218,48 @@ def test_random_people_prefers_different_collections(tmp_path):
     run(tmp_path, scenario)
 
 
+def test_not_upgraded_filter_and_regular_gifts(tmp_path):
+    def regular(slug, owner, star=50):
+        return ParsedGift(
+            slug=slug,
+            title=f"Обычный подарок, {star} звёзд",
+            number=int(slug.rsplit("-", 1)[1]),
+            owner=owner,
+            source="botapi",
+            upgraded=False,
+        )
+
+    async def scenario(db):
+        await db.upsert_collections([("pepe", "Pepes")])
+        await db.set_floor("pepe", 50)
+        await db.save_gifts([gift("pepe-1", Owner(username="whale"))])  # улучшенный NFT
+        await db.save_gifts(
+            [
+                regular("regular50-1", Owner(user_id=5, name="Kate")),
+                regular("regular15-2", Owner(username="bob"), star=15),
+            ]
+        )
+
+        # фильтр «Обычные подарки» -> только владельцы обычных подарков
+        people = await db.search_people(SearchQuery(not_upgraded=True), limit=10)
+        assert {p["username"] or p["o_name"] for p in people} == {"Kate", "bob"}
+        assert all(not p["is_upgraded"] for p in people)
+
+        # обычный подарок не считается NFT и не поднимает уровень владельца
+        bob = await owner_row(db, "bob")
+        assert (bob["gifts_count"], bob["value_ton"], bob["tier"]) == (0, 0, "light")
+
+        # обычные подарки не плодят служебные коллекции в пикере
+        assert {c["slug"] for c in await db.collections()} == {"pepe"}
+
+        # в обычном потоке/режимах — только NFT-владельцы, обычные не всплывают
+        # (whale: 1 NFT x 50 TON = 50 -> medium при порогах 30/300)
+        assert [p["username"] for p in await db.search_people(SearchQuery(tier="medium"), limit=10)] == ["whale"]
+        assert "bob" not in {p["username"] for p in await db.search_people(SearchQuery(), limit=10)}
+
+    run(tmp_path, scenario)
+
+
 def test_concurrent_saves_do_not_duplicate_owner(tmp_path):
     async def scenario(db):
         # живые проверки идут параллельно: два подарка одного нового владельца одновременно

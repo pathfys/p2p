@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .ratelimit import SPEED_PRESETS
-from .texts import FIELDS
+from .texts import FIELDS, TOGGLES
 
 PICKER_PAGE_SIZE = 16
 
@@ -82,6 +82,11 @@ def filters_panel(filters: dict) -> InlineKeyboardMarkup:
         value = filters.get(f"{field}_title") or filters.get(field) or any_word
         return _btn(f"{label}: {value}", FilterCb(action="pick", field=field))
 
+    def toggle_btn(field: str) -> InlineKeyboardButton:
+        label = TOGGLES[field]
+        state = "да" if filters.get(field) else "нет"
+        return _btn(f"{label}: {state}", FilterCb(action="toggle", field=field))
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [field_btn("collection")],
@@ -89,6 +94,8 @@ def filters_panel(filters: dict) -> InlineKeyboardMarkup:
             [field_btn("model"), field_btn("symbol")],
             [field_btn("tier"), field_btn("min_gifts")],
             [field_btn("min_rarity")],
+            [toggle_btn("not_upgraded")],
+            [toggle_btn("female")],
             [_btn("Найти", FilterCb(action="search"))],
             [_btn("Сбросить", FilterCb(action="reset")), _btn("Меню", MenuCb(action="main"))],
         ]

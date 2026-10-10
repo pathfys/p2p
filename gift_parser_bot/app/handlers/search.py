@@ -234,6 +234,23 @@ async def cb_set(call: CallbackQuery, callback_data: kb.FilterCb, state: FSMCont
     await call.answer()
 
 
+@router.callback_query(kb.FilterCb.filter(F.action == "toggle"))
+async def cb_toggle(call: CallbackQuery, callback_data: kb.FilterCb, state: FSMContext) -> None:
+    """Переключатели-галочки: «Обычные подарки» и «Девочки»."""
+    field = callback_data.field
+    if field not in texts.TOGGLES:
+        await call.answer()
+        return
+    filters = dict((await state.get_data()).get("filters", {}))
+    if filters.get(field):
+        filters.pop(field, None)
+    else:
+        filters[field] = True
+    await state.update_data(filters=filters)
+    await _render_panel(call, state)
+    await call.answer()
+
+
 @router.callback_query(kb.FilterCb.filter(F.action == "reset"))
 async def cb_reset(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(filters={})
@@ -252,6 +269,8 @@ async def cb_search(call: CallbackQuery, state: FSMContext, people_parser: Peopl
         tier=filters.get("tier"),
         min_gifts=int(filters["min_gifts"]) if filters.get("min_gifts") else None,
         min_rarity=int(filters["min_rarity"]) if filters.get("min_rarity") else None,
+        female=bool(filters.get("female")),
+        not_upgraded=bool(filters.get("not_upgraded")),
         seed=random.randint(1, 1_000_002),
     )
     await call.answer(texts.PARSING)

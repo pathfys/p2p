@@ -41,6 +41,21 @@ def subscription_line(checker: SubscriptionChecker | None) -> str:
     return f"Обязательная подписка: {escape(checker.channel)} — ок"
 
 
+def fill_line(st, gifts_total: int) -> str:
+    """Скорость наполнения базы: подарков/час за текущую сессию парсера + оценка до 100k."""
+    if not st.started_at or st.gifts <= 0:
+        return "Наполнение: —  (ждём первые подарки)"
+    elapsed = max(1.0, time.time() - st.started_at)
+    per_hour = st.gifts / elapsed * 3600
+    line = f"Наполнение: ~{num(per_hour)} подарков/час"
+    remaining = 100_000 - gifts_total
+    if per_hour >= 1 and remaining > 0:
+        line += f" · до 100k ≈ {num(remaining / per_hour)} ч"
+    elif remaining <= 0:
+        line += " · 100k достигнуто"
+    return line
+
+
 async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecker | None = None) -> str:
     st = crawler.status
     stats = await db.stats()
@@ -58,9 +73,10 @@ async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecke
         "",
         f"<b>Скорость: {crawler.preset}</b>",
         *(f"<code>{escape(limiter.describe())}</code>" for limiter in crawler.limiters.values()),
+        fill_line(st, stats["gifts"]),
         "",
-        f"База: подарков {num(stats['gifts'])} · владельцев {num(stats['owners'])} · "
-        f"коллекций {num(stats['collections'])} · юзеров {num(stats['users'])}",
+        f"База: NFT {num(stats['gifts'])} · обычных {num(stats.get('regular'))} · "
+        f"владельцев {num(stats['owners'])} · коллекций {num(stats['collections'])} · юзеров {num(stats['users'])}",
     ]
     if st.last_error:
         lines.append(f"\nПоследняя ошибка: <code>{escape(st.last_error[:300])}</code>")

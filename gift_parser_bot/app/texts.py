@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import Mapping
 
@@ -90,9 +91,31 @@ def owner_ref(row: Mapping) -> str:
     return "владелец скрыт"
 
 
+def _field(row: Mapping, key: str, default: object = None) -> object:
+    """Безопасно читает поле из sqlite3.Row или dict (у Row нет .get)."""
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return default
+    return default if value is None else value
+
+
+def _regular_label(row: Mapping) -> str:
+    """Понятная подпись обычного подарка. В базе на один обычный подарок нет своего
+    заголовка — коллекция хранится как «regular<звёзды>», отсюда и достаём число звёзд."""
+    coll = str(_field(row, "title", "") or "")
+    m = re.fullmatch(r"regular(\d+)", coll)
+    return f"Обычный подарок, {m.group(1)} звёзд" if m else "Обычный подарок"
+
+
 def _row_line(row: Mapping, index: int | None) -> str:
-    """Формат: «@username / ссылка на NFT / N NFT / ~X TON»."""
+    """Формат улучшенного NFT: «@username / ссылка на NFT / N NFT / ~X TON».
+    Обычный (неулучшенный) подарок: «@username / Обычный подарок, N звёзд» — страницы NFT у него нет."""
     prefix = f"{index}. " if index is not None else ""
+    if not _field(row, "is_upgraded", 1):
+        matched = _field(row, "matched", 0) or 0
+        tail = f" ({matched} шт.)" if matched and matched > 1 else ""
+        return f"{prefix}{owner_ref(row)} / {_regular_label(row)}{tail}"
     link = f'<a href="https://t.me/nft/{row["slug"]}">{escape(row["title"])} #{row["number"]}</a>'
     tail = ""
     if row["gifts_count"]:
@@ -147,12 +170,18 @@ SUBSCRIBE_FAIL = "Подписка на {channel} не найдена. Подп�
 SUBSCRIBE_OK = "Подписка подтверждена"
 
 
+TOGGLES: dict[str, str] = {"not_upgraded": "Обычные подарки", "female": "Девочки"}
+
+
 def filters_summary(filters: Mapping[str, str]) -> str:
     parts = []
     for field, (_, _) in FIELDS.items():
         if filters.get(field):
             value = filters.get(f"{field}_title") or filters[field]
             parts.append(escape(value))
+    for field, label in TOGGLES.items():
+        if filters.get(field):
+            parts.append(label.lower())
     return "Поиск: " + (" / ".join(parts) if parts else "все подарки")
 
 
@@ -161,6 +190,8 @@ def filters_panel(filters: Mapping[str, str]) -> str:
     for field, (label, any_word) in FIELDS.items():
         value = filters.get(f"{field}_title") or filters.get(field)
         lines.append(f"{label}: <b>{escape(value) if value else any_word}</b>")
+    for field, label in TOGGLES.items():
+        lines.append(f"{label}: <b>{'да' if filters.get(field) else 'нет'}</b>")
     lines.append("\nЗадайте нужные фильтры и нажмите «Найти».")
     return "\n".join(lines)
 
