@@ -281,6 +281,13 @@ def test_owner_backfill_queue_and_page_does_not_wipe_owner(tmp_path):
         await db.save_gifts([gift("pepe-1", owner=None, owner_name="Pavel Durov")])
         assert (await db.gift("pepe-1"))["username"] == "durov"
 
+        # подарок из MTProto уже знает про владельца (даже если тот скрыт) —
+        # повторно опрашивать его нельзя, это трата лимитов аккаунтов
+        hidden_from_mtproto = gift("pepe-9", owner=None, owner_name="Скрытый")
+        hidden_from_mtproto.source = "mtproto"
+        await db.save_gifts([hidden_from_mtproto])
+        assert "pepe-9" not in await db.gifts_without_owner(10)
+
         # скрытого владельца отмечаем, чтобы очередь не крутилась по кругу
         await db.save_gifts([gift("pepe-2", owner=None, owner_name="Hidden")])
         assert await db.gifts_without_owner(10) == ["pepe-2"]

@@ -92,6 +92,10 @@ LEFT JOIN owners o ON o.id = g.owner_id
 LEFT JOIN collections c ON c.slug = g.collection
 """
 
+# Источники, которые САМИ знают владельца: после них добирать его не нужно.
+# Страница t.me/nft владельца не отдаёт, поэтому её подарки идут в очередь добора.
+OWNER_AWARE_SOURCES = ("mtproto", "botapi")
+
 FILTER_FIELDS = ("collection", "backdrop", "model", "symbol")
 TIERS = ("light", "medium", "rich")
 # «Человек» в выдаче — Telegram-аккаунт (TON-кошельки и скрытые владельцы не считаются)
@@ -326,14 +330,16 @@ class Database:
                 touched.add(owner_id)
             await self.conn.execute(
                 """INSERT INTO gifts (slug, collection, number, model, model_rarity, backdrop, backdrop_rarity,
-                                      symbol, symbol_rarity, owner_id, owner_name, source, is_upgraded, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      symbol, symbol_rarity, owner_id, owner_name, source, is_upgraded,
+                                      owner_checked_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(slug) DO UPDATE SET
                        model = excluded.model, model_rarity = excluded.model_rarity,
                        backdrop = excluded.backdrop, backdrop_rarity = excluded.backdrop_rarity,
                        symbol = excluded.symbol, symbol_rarity = excluded.symbol_rarity,
                        owner_id = excluded.owner_id, owner_name = excluded.owner_name,
                        source = excluded.source, is_upgraded = excluded.is_upgraded,
+                       owner_checked_at = COALESCE(excluded.owner_checked_at, gifts.owner_checked_at),
                        updated_at = excluded.updated_at""",
                 (
                     gift.slug,
@@ -349,6 +355,7 @@ class Database:
                     None if owner_id else gift.owner_name,
                     gift.source,
                     int(gift.upgraded),
+                    now() if gift.source in OWNER_AWARE_SOURCES else None,
                     now(),
                 ),
             )

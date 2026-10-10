@@ -95,9 +95,11 @@ class RateLimiter:
             self.rps = max(self.min_rps, self.rps / 2)
 
     @property
-    def busy_until(self) -> float:
-        """До какого момента источник на паузе (нужно пулу, чтобы выбрать свободный аккаунт)."""
-        return self._paused_until
+    def ready_at(self) -> float:
+        """Когда источник сможет выполнить следующий запрос: учитывает и паузу после
+        429/FLOOD_WAIT, и обычный интервал между запросами. Пулу это нужно, чтобы
+        раскладывать нагрузку по аккаунтам, а не долбить первый свободный."""
+        return max(self._next_at, self._paused_until)
 
     def describe(self) -> str:
         mode = "auto" if self.adaptive else self.preset

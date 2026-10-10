@@ -171,7 +171,7 @@ class MtprotoPool:
         return [s.name for s in self.sources]
 
     def _by_readiness(self) -> list[MtprotoSource]:
-        return sorted(self.sources, key=lambda s: s.limiter.busy_until)
+        return sorted(self.sources, key=lambda s: s.limiter.ready_at)
 
     async def _any(self, call):
         from telethon.errors import FloodWaitError
