@@ -78,6 +78,8 @@ async def panel_text(crawler: Crawler, db: Database, checker: SubscriptionChecke
         "",
         f"База: NFT {num(stats['gifts'])} · обычных {num(stats.get('regular'))} · "
         f"владельцев {num(stats['owners'])} · коллекций {num(stats['collections'])} · юзеров {num(stats['users'])}",
+        f"Из них людей (@username): {num(stats.get('owners_named'))} · кошельков {num(stats.get('owners_wallet'))} · "
+        f"подарков со скрытым владельцем: {num(stats.get('hidden_gifts'))}",
     ]
     if st.last_error:
         lines.append(f"\nПоследняя ошибка: <code>{escape(st.last_error[:300])}</code>")

@@ -570,6 +570,16 @@ class Database:
             "gifts": await self._scalar("SELECT COUNT(*) FROM gifts WHERE is_upgraded = 1"),
             "regular": await self._scalar("SELECT COUNT(*) FROM gifts WHERE is_upgraded = 0"),
             "owners": await self._scalar("SELECT COUNT(*) FROM owners WHERE gifts_count > 0"),
+            # разбивка владельцев: именно @username/user_id дают «людей» в поиске,
+            # кошельки и подарки без владельца (скрытый профиль) — нет
+            "owners_named": await self._scalar(
+                "SELECT COUNT(*) FROM owners WHERE gifts_count > 0 AND (username IS NOT NULL OR user_id IS NOT NULL)"
+            ),
+            "owners_wallet": await self._scalar(
+                "SELECT COUNT(*) FROM owners WHERE gifts_count > 0 AND username IS NULL "
+                "AND user_id IS NULL AND ton_address IS NOT NULL"
+            ),
+            "hidden_gifts": await self._scalar("SELECT COUNT(*) FROM gifts WHERE is_upgraded = 1 AND owner_id IS NULL"),
             "collections": await self._scalar("SELECT COUNT(*) FROM collections"),
             "users": await self._scalar("SELECT COUNT(*) FROM users WHERE is_bot_user = 1"),
         }

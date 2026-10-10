@@ -307,16 +307,18 @@ class Crawler:
 
         async def one(n: int) -> object:
             async with semaphore:
-                return await self._safe_fetch(f"{slug}-{n}")
+                r = await self._safe_fetch(f"{slug}-{n}")
+                self.status.pages += 1  # прогресс виден сразу, а не после всего чанка
+                if r is None:
+                    self.status.missing += 1
+                return r
 
         results = await asyncio.gather(*(one(n) for n in range(number, end + 1)))
         gifts = [r for r in results if isinstance(r, ParsedGift)]
         if gifts:
             await self.db.save_gifts(gifts)
             issued = max([issued] + [g.issued or 0 for g in gifts])  # тираж мог вырасти
-        self.status.pages += len(results)
         self.status.gifts += len(gifts)
-        self.status.missing += sum(1 for r in results if r is None)
         # первый недокачанный (троттлинг/сеть) номер: курсор ставим на успешный префикс,
         # чтобы повторить именно его, а не «проскочить» подарок как отсутствующий
         first_transient = next((i for i, r in enumerate(results) if r is _TRANSIENT), None)
